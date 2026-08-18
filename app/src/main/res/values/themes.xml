@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose アプリはほぼ全てComposeで描画するため、
+         Activityテーマはシンプルに。
+         Compose の IntentPlayerTheme が実際のデザインを担当する。 -->
+    <style name="Theme.IntentPlayer" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

@@ -1,0 +1,78 @@
+name: Update Workflow Defaults
+
+# build-and-release.yml が完走した後に自動で起動する
+on:
+  workflow_run:
+    workflows: ["Build and Release Android App"]
+    types:
+      - completed
+
+jobs:
+  update-defaults:
+    name: Bump workflow_dispatch defaults
+    runs-on: ubuntu-latest
+    # ビルドが成功した場合のみ実行（失敗時はスキップ）
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # workflowファイルを書き換えるため workflows スコープ付き PAT が必要
+          token: ${{ secrets.WORKFLOW_PAT }}
+          ref: ${{ github.event.workflow_run.head_branch }}
+
+      - name: Read version.json
+        id: ver
+        run: |
+          VERSION_CODE=$(jq -r '.versionCode' version.json)
+          VERSION_NAME=$(jq -r '.versionName' version.json)
+          echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV
+          echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_ENV
+          echo "Read from version.json: versionCode=$VERSION_CODE, versionName=$VERSION_NAME"
+
+      - name: Update default values in build-and-release.yml
+        run: |
+          WORKFLOW_FILE=".github/workflows/build-and-release.yml"
+
+          # version_name の default: 行を更新
+          # 「        default: '...'」という行を対象にsedで書き換える
+          # version_name の default は最初に現れる default: 行
+          # version_code の default はその次に現れる default: 行
+          # awk で2回目の出現を書き換えることで確実に対象を絞る
+
+          awk -v vn="${VERSION_NAME}" -v vc="${VERSION_CODE}" '
+            /version_name:/ { in_vn=1 }
+            /version_code:/ { in_vn=0; in_vc=1 }
+            in_vn && /^[[:space:]]+default:/ && !vn_done {
+              sub(/default: '"'"'.*'"'"'/, "default: '"'"'" vn "'"'"'")
+              vn_done=1
+            }
+            in_vc && /^[[:space:]]+default:/ && !vc_done {
+              sub(/default: '"'"'.*'"'"'/, "default: '"'"'" vc "'"'"'")
+              vc_done=1
+            }
+            { print }
+          ' "$WORKFLOW_FILE" > "$WORKFLOW_FILE.tmp" && mv "$WORKFLOW_FILE.tmp" "$WORKFLOW_FILE"
+
+          echo "Updated defaults in $WORKFLOW_FILE:"
+          grep -A2 "version_name:" "$WORKFLOW_FILE" | head -6
+          grep -A2 "version_code:" "$WORKFLOW_FILE" | head -6
+
+      - name: Commit and push updated workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/build-and-release.yml
+          if git diff --staged --quiet; then
+            echo "No changes to workflow defaults. Skipping commit."
+          else
+            git commit -m "chore: update workflow defaults to versionName=${{ env.VERSION_NAME }}, versionCode=${{ env.VERSION_CODE }} [skip ci]"
+            git pull --rebase origin ${{ github.event.workflow_run.head_branch }} || true
+            git push
+            echo "Successfully pushed updated workflow defaults."
+          fi

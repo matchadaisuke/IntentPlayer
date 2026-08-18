@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">IntentPlayer</string>
+    <!-- Phase 10: NotificationChannel 名（設定画面に表示される） -->
+    <string name="notification_channel_name">音楽再生</string>
+    <string name="notification_channel_idle_name">待機中</string>
+</resources>

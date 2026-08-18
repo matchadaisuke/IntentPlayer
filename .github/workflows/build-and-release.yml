@@ -1,0 +1,155 @@
+name: Build and Release Android App
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: 'Version Name (空欄 = version.json から自動取得)'
+        required: false
+        default: 'v1.0'
+        type: string
+      version_code:
+        description: 'Version Code (空欄 = version.json から自動取得して+1)'
+        required: false
+        default: '100'
+        type: string
+
+jobs:
+  build:
+    name: Build & Publish APK
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Determine Version Info
+        id: version_info
+        run: |
+          JSON_VERSION_CODE=$(jq -r '.versionCode' version.json)
+          JSON_VERSION_NAME=$(jq -r '.versionName' version.json)
+
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            INPUT_VC="${{ github.event.inputs.version_code }}"
+            INPUT_VN="${{ github.event.inputs.version_name }}"
+
+            # 空欄の場合は version.json から取得
+            if [ -n "$INPUT_VC" ]; then
+              TARGET_VC="$INPUT_VC"
+            else
+              TARGET_VC=$((JSON_VERSION_CODE + 1))
+            fi
+
+            if [ -n "$INPUT_VN" ]; then
+              TARGET_VN="$INPUT_VN"
+            else
+              TARGET_VN="$JSON_VERSION_NAME"
+            fi
+          else
+            # push トリガー時は version.json の値をそのまま使用
+            TARGET_VC="$JSON_VERSION_CODE"
+            TARGET_VN="$JSON_VERSION_NAME-debug"
+          fi
+
+          if echo "$TARGET_VN" | grep -iqE "alpha|beta|rc"; then
+            echo "IS_PRERELEASE=true" >> $GITHUB_ENV
+            echo "Detected pre-release version: $TARGET_VN"
+          else
+            echo "IS_PRERELEASE=false" >> $GITHUB_ENV
+          fi
+
+          echo "TARGET_VC=$TARGET_VC" >> $GITHUB_ENV
+          echo "TARGET_VN=$TARGET_VN" >> $GITHUB_ENV
+          echo "Determined Version Code: $TARGET_VC"
+          echo "Determined Version Name: $TARGET_VN"
+
+      - name: Build Release APK
+        run: |
+          gradle assembleRelease -PversionCode=${{ env.TARGET_VC }} -PversionName=${{ env.TARGET_VN }}
+
+      - name: Sign APK
+        id: sign_app
+        uses: r0adkll/sign-android-release@v1
+        with:
+          releaseDirectory: app/build/outputs/apk/release
+          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
+          alias: ${{ secrets.ALIAS }}
+          keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD }}
+        env:
+          BUILD_TOOLS_VERSION: "35.0.0"
+
+      - name: Process Output APK
+        run: |
+          SIGNED_APK_PATH="${{ steps.sign_app.outputs.signedReleaseFile }}"
+          if [ -n "$SIGNED_APK_PATH" ] && [ -f "$SIGNED_APK_PATH" ]; then
+            DEST_NAME="IntentPlayer-${{ env.TARGET_VN }}-code${{ env.TARGET_VC }}.apk"
+            cp "$SIGNED_APK_PATH" "app/build/outputs/apk/release/$DEST_NAME"
+            echo "FINAL_APK=app/build/outputs/apk/release/$DEST_NAME" >> $GITHUB_ENV
+            echo "APK_NAME=$DEST_NAME" >> $GITHUB_ENV
+          else
+            UNSIGNED_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+            DEST_NAME="IntentPlayer-${{ env.TARGET_VN }}-code${{ env.TARGET_VC }}-unsigned.apk"
+            cp "$UNSIGNED_PATH" "app/build/outputs/apk/release/$DEST_NAME"
+            echo "FINAL_APK=app/build/outputs/apk/release/$DEST_NAME" >> $GITHUB_ENV
+            echo "APK_NAME=$DEST_NAME" >> $GITHUB_ENV
+          fi
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: ${{ env.APK_NAME }}
+          path: ${{ env.FINAL_APK }}
+          retention-days: 1
+
+      - name: Create GitHub Release (Workflow Dispatch Only)
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TARGET_VN }}
+          name: ${{ env.TARGET_VN }}
+          draft: false
+          prerelease: ${{ env.IS_PRERELEASE == 'true' }}
+          files: ${{ env.FINAL_APK }}
+          body: ""
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Auto-Bump version.json (Workflow Dispatch Only)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          NEXT_VC=$((TARGET_VC + 1))
+          NEXT_VN="${{ env.TARGET_VN }}"
+
+          jq --arg vc "$NEXT_VC" --arg vn "$NEXT_VN" '.versionCode = ($vc | tonumber) | .versionName = $vn' version.json > version.tmp.json && mv version.tmp.json version.json
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add version.json
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "chore: release ${{ env.TARGET_VN }} (code ${{ env.TARGET_VC }}) & bump next versionCode to $NEXT_VC [skip ci]"
+            git pull --rebase origin ${{ github.ref_name }} || true
+            git push
+          fi
