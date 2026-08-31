@@ -286,7 +286,7 @@ private fun NowPlayingSection(
 private fun VolumeSliderSection(volume: Float, enabled: Boolean, onVolumeChange: (Float) -> Unit) {
     Column {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("アプリ独自の音量", style = MaterialTheme.typography.bodySmall)
+            Text("音量", style = MaterialTheme.typography.bodySmall)
             Text("${(volume * 100).toInt()}%", style = MaterialTheme.typography.bodySmall)
         }
         Slider(
@@ -383,8 +383,8 @@ private fun TrackListSection(
 ) {
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("曲一覧", style = MaterialTheme.typography.titleSmall)
-            if (tracks.isNotEmpty()) Text("${tracks.size}曲", style = MaterialTheme.typography.bodySmall)
+            Text("再生ファイル一覧", style = MaterialTheme.typography.titleSmall, maxLines = 1)
+            if (tracks.isNotEmpty()) Text("${tracks.size}ファイル", style = MaterialTheme.typography.bodySmall)
         }
         Spacer(Modifier.height(8.dp))
         when {
