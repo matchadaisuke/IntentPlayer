@@ -5,9 +5,10 @@ on:
     branches: [ "main", "master" ]
 
 jobs:
-  build:
-    name: Compile Debug APK
+  verify:
+    name: Test, Lint & Build
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     permissions:
       contents: read
@@ -27,5 +28,14 @@ jobs:
         with:
           gradle-version: '8.7'
 
+      - name: Run unit tests
+        run: gradle testDebugUnitTest --stacktrace
+
+      - name: Run Android lint
+        run: gradle lintDebug --stacktrace
+
       - name: Compile debug APK
-        run: gradle assembleDebug
+        run: gradle assembleDebug --stacktrace
+
+      - name: Compile release APK
+        run: gradle assembleRelease --stacktrace
