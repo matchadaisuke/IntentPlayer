@@ -312,7 +312,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             while (isActive) {
                 val c = controller
                 if (c != null) {
-                    isPlaying.value = c.isPlaying
+                    isPlaying.value = c.playWhenReady && c.playbackState != Player.STATE_IDLE && c.playbackState != Player.STATE_ENDED
+                    playbackSpeed.value = c.playbackParameters.speed
                     if (c.isPlaying || c.playbackState == Player.STATE_READY || c.playbackState == Player.STATE_BUFFERING) {
                         currentPositionMs.value = c.currentPosition.coerceAtLeast(0L)
                         if (c.duration > 0) durationMs.value = c.duration
@@ -376,6 +377,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun playTrack(index: Int) {
         val currentFolder = folderUri.value ?: return
+        if (index !in tracks.value.indices) return
         val intent = Intent(context, PlaybackService::class.java).apply {
             putExtra(ControlReceiver.EXTRA_COMMAND, ControlReceiver.CMD_PLAY)
             putExtra(ControlReceiver.EXTRA_FOLDER_URI, currentFolder.toString())
@@ -387,9 +389,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 context.startService(intent)
             }
-            if (useCustomMediaPlayback.value) {
-                currentTrack.value = tracks.value.getOrNull(index)
-            } else if (controller == null || controller?.isConnected != true) {
+            if (!useCustomMediaPlayback.value && (controller == null || controller?.isConnected != true)) {
                 viewModelScope.launch {
                     delay(500L)
                     if (controller == null || controller?.isConnected != true) {
