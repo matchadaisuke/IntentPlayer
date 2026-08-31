@@ -1,0 +1,122 @@
+name: Apply Private Playback Patch
+
+on:
+  push:
+    branches: [hide-external-media-session]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hide-external-media-session
+          fetch-depth: 0
+      - name: Apply privacy-mode patch
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              if old not in text:
+                  raise SystemExit(f"missing patch target: {label}")
+              return text.replace(old, new, 1)
+
+          service_path = Path('app/src/main/java/com/intentplayer/service/PlaybackService.kt')
+          s = service_path.read_text()
+
+          s = replace_once(s,
+          '''        initExoPlayer()\n        initMediaSession()\n        setupNotificationProvider()\n        startPositionSaveLoop()''',
+          '''        initExoPlayer()\n        // 独自再生方式では MediaSession 自体を作らない。\n        // Wear OS / AVRCP / System UI に再生中の曲情報を公開しないため。\n        if (!PreferencesManager.isUseCustomMediaPlayback(this)) {\n            initMediaSession()\n            setupNotificationProvider()\n        }\n        startPositionSaveLoop()\n        startStateBroadcastLoop()''', 'service onCreate')
+
+          s = replace_once(s,
+          '''    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {\n        if (PreferencesManager.isUseCustomMediaPlayback(this) && controllerInfo.packageName != packageName) {\n            Log.d(TAG, "Blocked external controller ${controllerInfo.packageName}")\n            return null\n        }\n        return mediaSession\n    }''',
+          '''    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {\n        // custom mode では mediaSession が null なので、system / Wear OS / Bluetooth を含め\n        // どの controller にも再生セッションを公開しない。\n        return mediaSession\n    }''', 'onGetSession')
+
+          s = replace_once(s,
+          '''        mediaSession?.run {\n            player.release()\n            release()\n        }\n        mediaSession = null\n        playerWrapper = null\n        exoPlayer = null''',
+          '''        try { mediaSession?.release() } catch (_: Exception) {}\n        mediaSession = null\n        playerWrapper = null\n        try { exoPlayer?.release() } catch (_: Exception) {}\n        exoPlayer = null''', 'onDestroy release')
+
+          s = replace_once(s,
+          '''            CMD_APP_VOLUME -> applyVolume(intent.getFloatExtra(EXTRA_APP_VOLUME, 1.0f))\n        }\n    }''',
+          '''            CMD_APP_VOLUME -> applyVolume(intent.getFloatExtra(EXTRA_APP_VOLUME, 1.0f))\n            CMD_CUSTOM_MODE -> applyCustomMediaPlaybackMode(\n                intent.getBooleanExtra(EXTRA_CUSTOM_MODE, PreferencesManager.isUseCustomMediaPlayback(this))\n            )\n        }\n    }\n\n    private fun applyCustomMediaPlaybackMode(enabled: Boolean) {\n        if (enabled) {\n            // MediaSession が存在するだけで Android framework / AVRCP / Wear OS へ\n            // 再生情報が広告され得るため、custom mode では完全に release する。\n            try { mediaSession?.release() } catch (e: Exception) {\n                Log.w(TAG, "Failed to release MediaSession for private mode: ${e.message}")\n            }\n            mediaSession = null\n            defaultNotificationProvider = null\n            lastNotificationLayout = null\n            lastNotificationActionFactory = null\n            notificationChangedCallback = null\n            updateSilentNotification()\n        } else if (mediaSession == null) {\n            initMediaSession()\n            setupNotificationProvider()\n            refreshMediaPresentation()\n        }\n        sendPlaybackStateBroadcast()\n    }''', 'custom mode command')
+
+          s = replace_once(s,
+          '''    private fun initMediaSession() {\n        val player = playerWrapper ?: return''',
+          '''    private fun initMediaSession() {\n        if (PreferencesManager.isUseCustomMediaPlayback(this) || mediaSession != null) return\n        val player = playerWrapper ?: return''', 'session guard')
+
+          # Custom notification intentionally contains no track metadata so mirrored notifications
+          # on companion devices cannot reveal title/artist/artwork either.
+          start = s.index('    private fun buildSilentPlaybackNotification(): Notification {')
+          end = s.index('    private fun loadArtworkBitmap', start)
+          private_notification = '''    private fun buildSilentPlaybackNotification(): Notification {\n        val player = exoPlayer\n        val isPlaying = player?.isPlaying == true\n        val statusText = if (isPlaying) "再生中" else "一時停止中"\n        val tapIntent = PendingIntent.getActivity(\n            this,\n            0,\n            Intent(this, MainActivity::class.java).apply {\n                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK\n            },\n            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE\n        )\n        fun buildActionIntent(command: String): PendingIntent = PendingIntent.getBroadcast(\n            this,\n            command.hashCode(),\n            Intent(this, ControlReceiver::class.java).apply {\n                action = ControlReceiver.ACTION_CONTROL\n                putExtra(ControlReceiver.EXTRA_COMMAND, command)\n            },\n            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE\n        )\n        return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)\n            .setSmallIcon(R.drawable.ic_notification)\n            .setContentTitle(getString(R.string.app_name))\n            .setContentText(statusText)\n            .setContentIntent(tapIntent)\n            .addAction(0, "前へ", buildActionIntent(ControlReceiver.CMD_PREVIOUS))\n            .addAction(0, if (isPlaying) "一時停止" else "再生", buildActionIntent(if (isPlaying) ControlReceiver.CMD_PAUSE else ControlReceiver.CMD_PLAY))\n            .addAction(0, "次へ", buildActionIntent(ControlReceiver.CMD_NEXT))\n            .addAction(0, "停止", buildActionIntent(ControlReceiver.CMD_STOP))\n            .setPriority(NotificationCompat.PRIORITY_LOW)\n            .setOngoing(true)\n            .setSilent(true)\n            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)\n            .build()\n    }\n\n'''
+          s = s[:start] + private_notification + s[end:]
+
+          s = replace_once(s,
+          '''        if (PreferencesManager.isUseCustomMediaPlayback(this)) updateSilentNotification()\n    }''',
+          '''        if (PreferencesManager.isUseCustomMediaPlayback(this)) updateSilentNotification()\n        sendPlaybackStateBroadcast()\n    }''', 'refresh state broadcast')
+
+          s = replace_once(s,
+          '''    private fun startPositionSaveLoop() {\n        serviceScope.launch {\n            while (isActive) {\n                delay(POSITION_SAVE_INTERVAL_MS)\n                exoPlayer?.takeIf { it.isPlaying }?.let { saveCurrentPosition() }\n            }\n        }\n    }''',
+          '''    private fun startPositionSaveLoop() {\n        serviceScope.launch {\n            while (isActive) {\n                delay(POSITION_SAVE_INTERVAL_MS)\n                exoPlayer?.takeIf { it.isPlaying }?.let { saveCurrentPosition() }\n            }\n        }\n    }\n\n    private fun startStateBroadcastLoop() {\n        serviceScope.launch {\n            while (isActive) {\n                delay(STATE_BROADCAST_INTERVAL_MS)\n                if (PreferencesManager.isUseCustomMediaPlayback(this@PlaybackService)) {\n                    sendPlaybackStateBroadcast()\n                }\n            }\n        }\n    }\n\n    private fun sendPlaybackStateBroadcast() {\n        val player = exoPlayer ?: return\n        val index = player.currentMediaItemIndex\n        sendBroadcast(Intent(ACTION_PLAYBACK_STATE).setPackage(packageName).apply {\n            putExtra(EXTRA_STATE_INDEX, index)\n            putExtra(EXTRA_STATE_IS_PLAYING, player.isPlaying)\n            putExtra(EXTRA_STATE_POSITION_MS, player.currentPosition.coerceAtLeast(0L))\n            putExtra(EXTRA_STATE_DURATION_MS, player.duration.takeIf { it > 0 } ?: 0L)\n            putExtra(EXTRA_STATE_SPEED, player.playbackParameters.speed)\n            putExtra(EXTRA_STATE_HAS_MEDIA, player.mediaItemCount > 0)\n        })\n    }''', 'state broadcast loop')
+
+          s = replace_once(s,
+          '''        private const val CMD_APP_VOLUME = "app_volume"\n        private const val EXTRA_APP_VOLUME = "volume"\n        private const val POSITION_SAVE_INTERVAL_MS = 5_000L''',
+          '''        const val ACTION_PLAYBACK_STATE = "com.intentplayer.PLAYBACK_STATE_INTERNAL"\n        const val EXTRA_STATE_INDEX = "stateIndex"\n        const val EXTRA_STATE_IS_PLAYING = "stateIsPlaying"\n        const val EXTRA_STATE_POSITION_MS = "statePositionMs"\n        const val EXTRA_STATE_DURATION_MS = "stateDurationMs"\n        const val EXTRA_STATE_SPEED = "stateSpeed"\n        const val EXTRA_STATE_HAS_MEDIA = "stateHasMedia"\n        const val CMD_CUSTOM_MODE = "custom_mode"\n        const val EXTRA_CUSTOM_MODE = "customMode"\n        private const val CMD_APP_VOLUME = "app_volume"\n        private const val EXTRA_APP_VOLUME = "volume"\n        private const val POSITION_SAVE_INTERVAL_MS = 5_000L\n        private const val STATE_BROADCAST_INTERVAL_MS = 500L''', 'service constants')
+
+          service_path.write_text(s)
+
+          vm_path = Path('app/src/main/java/com/intentplayer/ui/MainViewModel.kt')
+          v = vm_path.read_text()
+
+          v = replace_once(v,
+          '''import android.app.Application\nimport android.content.ComponentName\nimport android.content.Intent''',
+          '''import android.app.Application\nimport android.content.BroadcastReceiver\nimport android.content.ComponentName\nimport android.content.Context\nimport android.content.Intent\nimport android.content.IntentFilter''', 'vm imports')
+
+          v = replace_once(v,
+          '''    private var positionPollingJob: Job? = null\n\n    init {''',
+          '''    private var positionPollingJob: Job? = null\n\n    private val playbackStateReceiver = object : BroadcastReceiver() {\n        override fun onReceive(receiverContext: Context, intent: Intent) {\n            if (intent.action != PlaybackService.ACTION_PLAYBACK_STATE) return\n            val hasMedia = intent.getBooleanExtra(PlaybackService.EXTRA_STATE_HAS_MEDIA, false)\n            val index = intent.getIntExtra(PlaybackService.EXTRA_STATE_INDEX, -1)\n            isPlaying.value = intent.getBooleanExtra(PlaybackService.EXTRA_STATE_IS_PLAYING, false)\n            currentPositionMs.value = intent.getLongExtra(PlaybackService.EXTRA_STATE_POSITION_MS, 0L)\n            durationMs.value = intent.getLongExtra(PlaybackService.EXTRA_STATE_DURATION_MS, 0L)\n            playbackSpeed.value = intent.getFloatExtra(PlaybackService.EXTRA_STATE_SPEED, 1.0f)\n            currentTrack.value = if (hasMedia) tracks.value.getOrNull(index) else null\n        }\n    }\n\n    init {''', 'state receiver')
+
+          v = replace_once(v,
+          '''        initMediaController()\n        startPositionPolling()''',
+          '''        val stateFilter = IntentFilter(PlaybackService.ACTION_PLAYBACK_STATE)\n        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {\n            context.registerReceiver(playbackStateReceiver, stateFilter, Context.RECEIVER_NOT_EXPORTED)\n        } else {\n            context.registerReceiver(playbackStateReceiver, stateFilter)\n        }\n\n        if (!useCustomMediaPlayback.value) initMediaController()\n        startPositionPolling()''', 'register receiver')
+
+          v = replace_once(v,
+          '''    fun setUseCustomMediaPlayback(enabled: Boolean) {\n        PreferencesManager.setUseCustomMediaPlayback(context, enabled)\n        useCustomMediaPlayback.value = enabled\n    }''',
+          '''    fun setUseCustomMediaPlayback(enabled: Boolean) {\n        PreferencesManager.setUseCustomMediaPlayback(context, enabled)\n        useCustomMediaPlayback.value = enabled\n        sendServiceCommand(PlaybackService.CMD_CUSTOM_MODE) {\n            putExtra(PlaybackService.EXTRA_CUSTOM_MODE, enabled)\n        }\n        if (enabled) {\n            releaseMediaController()\n        } else {\n            viewModelScope.launch {\n                delay(300L)\n                initMediaController()\n            }\n        }\n    }''', 'vm custom toggle')
+
+          v = replace_once(v,
+          '''    private fun initMediaController() {\n        val sessionToken''',
+          '''    private fun initMediaController() {\n        if (useCustomMediaPlayback.value) return\n        val sessionToken''', 'controller guard')
+
+          # Don't repeatedly try to connect to a deliberately absent session in private mode.
+          v = replace_once(v,
+          '''                    if (!c.isConnected) {\n                        controller = null\n                        initMediaController()\n                    }''',
+          '''                    if (!c.isConnected) {\n                        controller = null\n                        if (!useCustomMediaPlayback.value) initMediaController()\n                    }''', 'poll reconnect guard')
+
+          v = replace_once(v,
+          '''            if (controller == null || controller?.isConnected != true) {\n                viewModelScope.launch {\n                    delay(500L)\n                    if (controller == null || controller?.isConnected != true) {\n                        controllerRetryCount = 0\n                        initMediaController()\n                    }\n                }\n            }''',
+          '''            if (useCustomMediaPlayback.value) {\n                currentTrack.value = tracks.value.getOrNull(index)\n            } else if (controller == null || controller?.isConnected != true) {\n                viewModelScope.launch {\n                    delay(500L)\n                    if (controller == null || controller?.isConnected != true) {\n                        controllerRetryCount = 0\n                        initMediaController()\n                    }\n                }\n            }''', 'playTrack custom')
+
+          old_controls = '''    fun pause() { controller?.pause() }\n    fun resume() { controller?.play() }\n\n    fun stop() {\n        controller?.stop()\n        currentTrack.value = null\n        currentPositionMs.value = 0L\n        durationMs.value = 0L\n    }\n\n    fun next() { controller?.seekToNextMediaItem() }\n    fun previous() { controller?.seekToPreviousMediaItem() }\n\n    fun seekTo(positionMs: Long) {\n        controller?.seekTo(positionMs)\n        currentPositionMs.value = positionMs\n    }\n\n    fun setPlaybackSpeed(speed: Float) {\n        val safe = speed.coerceIn(0.5f, 2.0f)\n        controller?.setPlaybackSpeed(safe)\n        playbackSpeed.value = safe\n    }'''
+          new_controls = '''    fun pause() {\n        if (useCustomMediaPlayback.value) sendServiceCommand(ControlReceiver.CMD_PAUSE)\n        else controller?.pause()\n    }\n\n    fun resume() {\n        if (useCustomMediaPlayback.value) sendServiceCommand(ControlReceiver.CMD_PLAY)\n        else controller?.play()\n    }\n\n    fun stop() {\n        if (useCustomMediaPlayback.value) sendServiceCommand(ControlReceiver.CMD_STOP)\n        else controller?.stop()\n        currentTrack.value = null\n        currentPositionMs.value = 0L\n        durationMs.value = 0L\n    }\n\n    fun next() {\n        if (useCustomMediaPlayback.value) sendServiceCommand(ControlReceiver.CMD_NEXT)\n        else controller?.seekToNextMediaItem()\n    }\n\n    fun previous() {\n        if (useCustomMediaPlayback.value) sendServiceCommand(ControlReceiver.CMD_PREVIOUS)\n        else controller?.seekToPreviousMediaItem()\n    }\n\n    fun seekTo(positionMs: Long) {\n        if (useCustomMediaPlayback.value) {\n            sendServiceCommand(ControlReceiver.CMD_SEEK) {\n                putExtra(ControlReceiver.EXTRA_SEEK_TO, positionMs)\n            }\n        } else controller?.seekTo(positionMs)\n        currentPositionMs.value = positionMs\n    }\n\n    fun setPlaybackSpeed(speed: Float) {\n        val safe = speed.coerceIn(0.5f, 2.0f)\n        if (useCustomMediaPlayback.value) {\n            sendServiceCommand(ControlReceiver.CMD_SPEED) {\n                putExtra(ControlReceiver.EXTRA_SPEED, safe)\n            }\n        } else controller?.setPlaybackSpeed(safe)\n        playbackSpeed.value = safe\n    }\n\n    private fun sendServiceCommand(command: String, extras: Intent.() -> Unit = {}) {\n        val intent = Intent(context, PlaybackService::class.java).apply {\n            putExtra(ControlReceiver.EXTRA_COMMAND, command)\n            extras()\n        }\n        try {\n            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && command == ControlReceiver.CMD_PLAY) {\n                context.startForegroundService(intent)\n            } else {\n                context.startService(intent)\n            }\n        } catch (e: Exception) {\n            Log.w(TAG, "Service command failed: $command: ${e.message}")\n        }\n    }\n\n    private fun releaseMediaController() {\n        controller = null\n        controllerFuture?.let { MediaController.releaseFuture(it) }\n        controllerFuture = null\n        controllerRetryCount = 0\n    }'''
+          v = replace_once(v, old_controls, new_controls, 'custom controls')
+
+          v = replace_once(v,
+          '''        positionPollingJob?.cancel()\n        controllerFuture?.let { MediaController.releaseFuture(it) }''',
+          '''        positionPollingJob?.cancel()\n        try { context.unregisterReceiver(playbackStateReceiver) } catch (_: Exception) {}\n        controllerFuture?.let { MediaController.releaseFuture(it) }''', 'unregister receiver')
+
+          vm_path.write_text(v)
+          PY
+
+          rm -f .github/workflows/apply-private-playback.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/intentplayer/service/PlaybackService.kt app/src/main/java/com/intentplayer/ui/MainViewModel.kt .github/workflows/apply-private-playback.yml
+          git commit -m "Hide media session and metadata in custom playback mode"
+          git push origin HEAD:hide-external-media-session
