@@ -249,7 +249,9 @@ class PlaybackService : MediaSessionService() {
                     .build(),
                 false
             )
-            .setHandleAudioBecomingNoisy(true)
+            // イヤホン切断は下の Bluetooth/AudioDeviceCallback で一元管理する。
+            // ExoPlayer 側も自動停止すると、切断前が再生中だったか判定できず自動再開を失う場合がある。
+            .setHandleAudioBecomingNoisy(false)
             .setWakeMode(C.WAKE_MODE_LOCAL)
             .build()
 
