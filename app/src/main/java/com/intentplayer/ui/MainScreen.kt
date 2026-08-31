@@ -274,7 +274,7 @@ private fun SeekSection(
     var value by remember { mutableStateOf(0f) }
     val actual = if (dragging) value else if (duration > 0) position.toFloat() / duration else 0f
     val shown = if (duration > 0) (actual.coerceIn(0f, 1f) * duration).toLong() else 0L
-    val safeSpeed = speed.takeIf { it > 0f } ?: 1f
+    val safeSpeed = PreferencesManager.normalizePlaybackSpeed(speed)
     val currentRemainingMedia = (duration - shown).coerceAtLeast(0L)
     val fileRemaining = (currentRemainingMedia / safeSpeed).toLong()
     val queueRemaining = ((currentRemainingMedia + followingDuration.coerceAtLeast(0L)) / safeSpeed).toLong()
@@ -302,13 +302,22 @@ private fun SeekSection(
 @Composable
 private fun SpeedSelector(speed: Float, setSpeed: (Float) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
+    val options = remember {
+        generateSequence(PreferencesManager.MIN_PLAYBACK_SPEED) { previous ->
+            (previous + PreferencesManager.PLAYBACK_SPEED_STEP)
+                .takeIf { it <= PreferencesManager.MAX_PLAYBACK_SPEED + 0.001f }
+        }.map(PreferencesManager::normalizePlaybackSpeed).distinct().toList()
+    }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
         Text("再生速度")
         Box {
             OutlinedButton({ expanded = true }) { Text("${speedText(speed)}×") }
-            DropdownMenu(expanded, { expanded = false }) {
-                listOf(.5f, .75f, 1f, 1.25f, 1.5f, 1.75f, 2f).forEach { s ->
-                    DropdownMenuItem({ Text("${speedText(s)}×") }, { setSpeed(s); expanded = false })
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                options.forEach { s ->
+                    DropdownMenuItem(
+                        text = { Text("${speedText(s)}×") },
+                        onClick = { setSpeed(s); expanded = false }
+                    )
                 }
             }
         }
