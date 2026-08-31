@@ -39,8 +39,9 @@ object PreferencesManager {
     private const val KEY_PREF_ENABLE_APP_VOLUME = "pref_enable_app_volume"
     private const val KEY_PREF_APP_PLAYBACK_VOLUME = "pref_app_playback_volume"
 
-
-
+    const val MIN_AUTO_RESUME_TIMEOUT_MS = 10_000L
+    const val MAX_AUTO_RESUME_TIMEOUT_MS = 24L * 60L * 60L * 1000L
+    const val MAX_APP_PLAYBACK_VOLUME = 2.0f
 
     // ==========================================
     // フォルダ URI
@@ -244,12 +245,14 @@ object PreferencesManager {
 
     fun getAutoResumeTimeoutMs(context: Context): Long {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .getLong(KEY_PREF_AUTO_RESUME_TIMEOUT_MS, 30000L)
+            .getLong(KEY_PREF_AUTO_RESUME_TIMEOUT_MS, 30_000L)
+            .coerceIn(MIN_AUTO_RESUME_TIMEOUT_MS, MAX_AUTO_RESUME_TIMEOUT_MS)
     }
 
     fun setAutoResumeTimeoutMs(context: Context, timeoutMs: Long) {
+        val safeTimeout = timeoutMs.coerceIn(MIN_AUTO_RESUME_TIMEOUT_MS, MAX_AUTO_RESUME_TIMEOUT_MS)
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit { putLong(KEY_PREF_AUTO_RESUME_TIMEOUT_MS, timeoutMs) }
+            .edit { putLong(KEY_PREF_AUTO_RESUME_TIMEOUT_MS, safeTimeout) }
     }
 
     fun isUseCustomMediaPlayback(context: Context): Boolean {
@@ -273,15 +276,14 @@ object PreferencesManager {
     }
 
     fun getAppPlaybackVolume(context: Context): Float {
-        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val value = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .getFloat(KEY_PREF_APP_PLAYBACK_VOLUME, 1.0f)
+        return if (value.isFinite()) value.coerceIn(0.0f, MAX_APP_PLAYBACK_VOLUME) else 1.0f
     }
 
     fun setAppPlaybackVolume(context: Context, volume: Float) {
+        val safeVolume = if (volume.isFinite()) volume.coerceIn(0.0f, MAX_APP_PLAYBACK_VOLUME) else 1.0f
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit { putFloat(KEY_PREF_APP_PLAYBACK_VOLUME, volume) }
+            .edit { putFloat(KEY_PREF_APP_PLAYBACK_VOLUME, safeVolume) }
     }
 }
-
-
-
