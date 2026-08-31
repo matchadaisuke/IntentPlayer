@@ -9,9 +9,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Environment
 import android.os.SystemClock
-import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
@@ -85,7 +83,6 @@ class MainActivity : ComponentActivity() {
         if (!PreferencesManager.isFirstLaunch(this)) {
             requestNotificationPermission()
             requestRuntimePermissions()
-            requestAllFilesAccess()
             checkBatteryOptimization()
         }
 
@@ -159,19 +156,6 @@ class MainActivity : ComponentActivity() {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
         if (missing.isNotEmpty()) requestPermissions(missing.toTypedArray(), REQUEST_CODE_RUNTIME_PERMISSIONS)
-    }
-
-    private fun requestAllFilesAccess() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()) return
-        try {
-            startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName")))
-        } catch (_: Exception) {
-            try {
-                startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-            } catch (_: Exception) {
-                Toast.makeText(this, "すべてのファイルへのアクセス設定を開けませんでした。SAFを利用できます。", Toast.LENGTH_LONG).show()
-            }
-        }
     }
 
     private fun checkBatteryOptimization() {
