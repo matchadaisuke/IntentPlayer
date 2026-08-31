@@ -1,8 +1,9 @@
 package com.intentplayer.ui
 
+import android.view.ViewGroup
+import android.widget.NumberPicker
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -15,8 +16,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import com.intentplayer.storage.PreferencesManager
 import kotlin.math.roundToLong
 
@@ -56,24 +57,24 @@ fun SettingsScreen(viewModel: MainViewModel) {
                 .padding(16.dp)
         ) {
             SettingSwitchRow(
-                title = "独自のメディア再生システムを使う",
-                description = "オンにすると、Bluetoothイヤホン・スマートウォッチ等からのメディアボタン操作を受け付けず、インテントとアプリ内操作を中心に再生します。",
+                title = "外部機器に再生情報を出さない",
+                description = "オンにすると、イヤホンや時計からの再生操作を受け付けず、再生中の曲情報も外部機器に表示しません。アプリ内とMacroDroidからは操作できます。",
                 checked = useCustomMediaPlayback,
                 onCheckedChange = viewModel::setUseCustomMediaPlayback
             )
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
             SettingSwitchRow(
-                title = "アプリ独自の音量調整",
-                description = "オンにすると、メイン画面からシステム音量とは別に0〜200%で調整できます。100%を超える範囲はLoudnessEnhancerで増幅します。",
+                title = "アプリの音量をさらに大きくする",
+                description = "オンにすると、アプリ内の音量を0〜500%で調整できます。100%を超えると音を増幅するため、音源や端末によっては音が歪むことがあります。",
                 checked = enableAppVolume,
                 onCheckedChange = viewModel::setEnableAppVolume
             )
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
             SettingSwitchRow(
-                title = "イヤホン脱着時の自動制御",
-                description = "イヤホンの切断時に再生を自動で停止し、再接続時に続きから再開します。",
+                title = "イヤホンを外したら止め、戻したら再開",
+                description = "イヤホンやBluetooth機器が外れたら自動で一時停止し、つなぎ直したら続きから再生します。",
                 checked = autoBluetoothControlEnabled,
                 onCheckedChange = viewModel::setAutoBluetoothControlEnabled
             )
@@ -81,8 +82,8 @@ fun SettingsScreen(viewModel: MainViewModel) {
 
             if (autoBluetoothControlEnabled) {
                 SettingSwitchRow(
-                    title = "再接続の有効期限を設定",
-                    description = "オンにすると、切断から指定時間を超えた再接続では自動再開しません。1秒〜24時間まで設定できます。",
+                    title = "自動再開できる時間を決める",
+                    description = "オンにすると、イヤホンを外してから指定した時間を過ぎた場合は、つなぎ直しても自動再開しません。10分〜24時間で設定できます。",
                     checked = autoResumeTimeoutEnabled,
                     onCheckedChange = viewModel::setAutoResumeTimeoutEnabled
                 )
@@ -96,24 +97,24 @@ fun SettingsScreen(viewModel: MainViewModel) {
             }
 
             SettingSwitchRow(
-                title = "消音時は自動一時停止",
-                description = "スピーカーまたはBluetooth再生中にメディア音量が0になったら一時停止し、その自動停止後に同じ出力経路で音量を上げると再開します。",
+                title = "音量を0にしたら自動で一時停止",
+                description = "端末やBluetooth機器の音量を0にすると自動で一時停止し、同じ出力先の音量を上げると自動で再開します。",
                 checked = blockSpeakerMutePlaybackEnabled,
                 onCheckedChange = viewModel::setBlockSpeakerMutePlaybackEnabled
             )
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
             SettingSwitchRow(
-                title = "オーディオフォーカスを送信しない",
-                description = "オンにすると、再生開始時に他のアプリの音を止めません。オフにすると他の音楽を一時停止させながら再生を開始します。",
+                title = "他のアプリの音楽を止めずに再生する",
+                description = "オンにすると、IntentPlayerを再生しても他の音楽アプリへ停止を求めません。オフにすると、他のアプリの音が止まる場合があります。",
                 checked = blockAudioFocusSend,
                 onCheckedChange = viewModel::setBlockAudioFocusSend
             )
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
             SettingSwitchRow(
-                title = "オーディオフォーカスを受信しない",
-                description = "オンにすると、他のアプリが再生を開始しても割り込みを無視して再生を続けます。",
+                title = "他のアプリが再生を始めても止まらない",
+                description = "オンにすると、別の音楽アプリや動画アプリが音を出し始めてもIntentPlayerはそのまま再生を続けます。",
                 checked = blockAudioFocusReceive,
                 onCheckedChange = viewModel::setBlockAudioFocusReceive
             )
@@ -126,9 +127,9 @@ fun SettingsScreen(viewModel: MainViewModel) {
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Bluetooth再接続ディレイ時間", style = MaterialTheme.typography.titleMedium)
+                        Text("イヤホン接続後、再生まで少し待つ", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "切断後、再接続された際の再生開始までの待機時間（ミリ秒）です。",
+                            "イヤホンやBluetooth機器をつなぎ直したあと、再生を始めるまでの待ち時間です。機器の切り替えが不安定なときに少し長くします。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -150,26 +151,26 @@ fun SettingsScreen(viewModel: MainViewModel) {
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("インテント仕様 (外部制御用)", style = MaterialTheme.typography.titleMedium)
+                    Text("MacroDroidなどから操作するための情報", style = MaterialTheme.typography.titleMedium)
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("■ 受信コマンド ( com.intentplayer.CONTROL )", style = MaterialTheme.typography.labelLarge)
+                    Text("■ 受け付ける操作 ( com.intentplayer.CONTROL )", style = MaterialTheme.typography.labelLarge)
                     Text(
-                        "Extras:\n・command (String): play | force_play | pause | stop | next | previous | seek | speed\n" +
-                            "・folderUri (String): SAFフォルダURI (play/force_play時。省略時は前回続きから)\n" +
-                            "・seekTo (Long): シーク位置ミリ秒 (seek時)\n" +
-                            "・speed (Float): 速度 0.5〜2.0 (speed時)",
+                        "command: play / force_play / pause / stop / next / previous / seek / speed\n" +
+                            "folderUri: 再生するフォルダ\n" +
+                            "seekTo: 移動先の再生位置（ミリ秒）\n" +
+                            "speed: 再生速度 0.5〜2.0",
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(bottom = 8.dp)
                     )
-                    Text("■ 送信イベント ( com.intentplayer.PLAYBACK_EVENT )", style = MaterialTheme.typography.labelLarge)
+                    Text("■ 再生完了のお知らせ ( com.intentplayer.PLAYBACK_EVENT )", style = MaterialTheme.typography.labelLarge)
                     Text(
-                        "Extras:\n・event (String): track_completed | playlist_completed\n・trackName (String): 対象のトラック名",
+                        "event: track_completed / playlist_completed\ntrackName: 対象の曲名",
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(bottom = 8.dp)
                     )
-                    Text("■ エラー通知 ( com.intentplayer.ERROR )", style = MaterialTheme.typography.labelLarge)
+                    Text("■ エラーのお知らせ ( com.intentplayer.ERROR )", style = MaterialTheme.typography.labelLarge)
                     Text(
-                        "Extras:\n・reason (String): no_files | permission_denied | playback_failed など\n・message (String): エラーの詳細メッセージ",
+                        "reason: エラーの種類\nmessage: エラー内容",
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
@@ -192,11 +193,11 @@ fun SettingsScreen(viewModel: MainViewModel) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("エラーログ (直近20件)", style = MaterialTheme.typography.titleMedium)
+                Text("最近のエラー (20件まで)", style = MaterialTheme.typography.titleMedium)
                 TextButton(onClick = viewModel::clearErrorLogs) { Text("クリア") }
             }
             if (errorLogs.isEmpty()) {
-                Text("エラーログはありません", modifier = Modifier.padding(top = 8.dp))
+                Text("エラーはありません", modifier = Modifier.padding(top = 8.dp))
             } else {
                 errorLogs.forEach { log ->
                     Text(
@@ -240,14 +241,13 @@ private fun AutoResumeTimeoutEditor(
     timeoutMs: Long,
     onTimeoutChanged: (Long) -> Unit
 ) {
-    val seconds = (timeoutMs / 1000L).coerceIn(
-        PreferencesManager.MIN_AUTO_RESUME_TIMEOUT_MS / 1000L,
-        PreferencesManager.MAX_AUTO_RESUME_TIMEOUT_MS / 1000L
-    )
-    var secondsText by remember(seconds) { mutableStateOf(seconds.toString()) }
-    val minMinutes = PreferencesManager.MIN_AUTO_RESUME_TIMEOUT_MS / 60_000f
-    val maxMinutes = PreferencesManager.MAX_AUTO_RESUME_TIMEOUT_MS / 60_000f
-    val sliderMinutes = timeoutMs / 60_000f
+    val minMs = PreferencesManager.MIN_AUTO_RESUME_TIMEOUT_MS
+    val maxMs = PreferencesManager.MAX_AUTO_RESUME_TIMEOUT_MS
+    val safeMs = timeoutMs.coerceIn(minMs, maxMs)
+    val minMinutes = (minMs / 60_000L).toInt()
+    val maxMinutes = (maxMs / 60_000L).toInt()
+    val totalMinutes = (safeMs / 60_000L).toInt()
+    var showDetailDialog by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
         Row(
@@ -255,42 +255,114 @@ private fun AutoResumeTimeoutEditor(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text("有効期限", style = MaterialTheme.typography.titleMedium)
-            Text(formatDuration(timeoutMs), style = MaterialTheme.typography.titleMedium)
+            Text("自動再開できる時間", style = MaterialTheme.typography.titleMedium)
+            Text(formatDuration(safeMs), style = MaterialTheme.typography.titleMedium)
         }
-        Slider(
-            value = sliderMinutes.coerceIn(minMinutes, maxMinutes),
-            onValueChange = { minutes ->
-                onTimeoutChanged(
-                    (minutes * 60_000f).roundToLong().coerceIn(
-                        PreferencesManager.MIN_AUTO_RESUME_TIMEOUT_MS,
-                        PreferencesManager.MAX_AUTO_RESUME_TIMEOUT_MS
-                    )
-                )
-            },
-            valueRange = minMinutes..maxMinutes
+        Text(
+            "スライダーは10分刻みで大まかに調整できます。秒単位で決めたい場合は詳細設定を使ってください。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Spacer(modifier = Modifier.height(8.dp))
-        OutlinedTextField(
-            value = secondsText,
-            onValueChange = { input ->
-                val digits = input.filter { it.isDigit() }.take(5)
-                secondsText = digits
-                digits.toLongOrNull()?.let { parsed ->
-                    onTimeoutChanged(
-                        (parsed * 1000L).coerceIn(
-                            PreferencesManager.MIN_AUTO_RESUME_TIMEOUT_MS,
-                            PreferencesManager.MAX_AUTO_RESUME_TIMEOUT_MS
-                        )
-                    )
+        Slider(
+            value = totalMinutes.toFloat(),
+            onValueChange = { minutes ->
+                val roundedMinutes = ((minutes / 10f).roundToLong() * 10L)
+                    .coerceIn(minMinutes.toLong(), maxMinutes.toLong())
+                onTimeoutChanged(roundedMinutes * 60_000L)
+            },
+            valueRange = minMinutes.toFloat()..maxMinutes.toFloat(),
+            steps = ((maxMinutes - minMinutes) / 10 - 1).coerceAtLeast(0)
+        )
+        TextButton(onClick = { showDetailDialog = true }) {
+            Text("詳しく設定する")
+        }
+    }
+
+    if (showDetailDialog) {
+        TimeoutDetailDialog(
+            timeoutMs = safeMs,
+            onDismiss = { showDetailDialog = false },
+            onConfirm = { newMs ->
+                onTimeoutChanged(newMs.coerceIn(minMs, maxMs))
+                showDetailDialog = false
+            }
+        )
+    }
+}
+
+@Composable
+private fun TimeoutDetailDialog(
+    timeoutMs: Long,
+    onDismiss: () -> Unit,
+    onConfirm: (Long) -> Unit
+) {
+    val initialSeconds = (timeoutMs / 1000L).coerceIn(600L, 86_400L)
+    var hours by remember { mutableStateOf((initialSeconds / 3600L).toInt()) }
+    var minutes by remember { mutableStateOf(((initialSeconds % 3600L) / 60L).toInt()) }
+    var seconds by remember { mutableStateOf((initialSeconds % 60L).toInt()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("時間を詳しく設定") },
+        text = {
+            Column {
+                Text(
+                    "時間・分・秒をそれぞれ上下に回して選びます。設定できる範囲は10分〜24時間です。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    NumberWheel("時間", hours, 0, 24) { hours = it }
+                    NumberWheel("分", minutes, 0, 59) { minutes = it }
+                    NumberWheel("秒", seconds, 0, 59) { seconds = it }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val totalSeconds = (hours * 3600L + minutes * 60L + seconds)
+                    .coerceIn(600L, 86_400L)
+                onConfirm(totalSeconds * 1000L)
+            }) { Text("決定") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("キャンセル") }
+        }
+    )
+}
+
+@Composable
+private fun NumberWheel(
+    label: String,
+    value: Int,
+    minValue: Int,
+    maxValue: Int,
+    onValueChanged: (Int) -> Unit
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        AndroidView(
+            factory = { context ->
+                NumberPicker(context).apply {
+                    this.minValue = minValue
+                    this.maxValue = maxValue
+                    wrapSelectorWheel = true
+                    descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+                    setOnValueChangedListener { _, _, newValue -> onValueChanged(newValue) }
                 }
             },
-            label = { Text("秒数で指定") },
-            supportingText = { Text("1〜86400秒（24時間）。スライダーと数値入力は常に同期します。") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.fillMaxWidth()
+            update = { picker ->
+                picker.minValue = minValue
+                picker.maxValue = maxValue
+                if (picker.value != value) picker.value = value.coerceIn(minValue, maxValue)
+            },
+            modifier = Modifier.width(88.dp).height(150.dp)
         )
+        Text(label, style = MaterialTheme.typography.labelMedium)
     }
 }
 
