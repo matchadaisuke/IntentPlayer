@@ -21,6 +21,9 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import com.intentplayer.service.PlaybackService
@@ -33,6 +36,7 @@ import com.intentplayer.ui.theme.IntentPlayerTheme
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
     private var lastExitBackAtMs = 0L
+    private var playerTabRequest by mutableIntStateOf(0)
 
     private val playbackErrorReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -56,6 +60,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleLaunchIntent(intent)
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -72,7 +77,18 @@ class MainActivity : ComponentActivity() {
         if (!PreferencesManager.isFirstLaunch(this)) {
             requestNotificationPermission(); requestStoragePermission(); requestAllFilesAccess(); checkBatteryOptimization()
         }
-        setContent { IntentPlayerTheme { Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { MainScreen(viewModel, { folderPickerLauncher.launch(null) }, ::openBatteryOptimizationSettings) } } }
+        setContent {
+            IntentPlayerTheme {
+                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    MainScreen(
+                        viewModel = viewModel,
+                        onSelectFolderClick = { folderPickerLauncher.launch(null) },
+                        onBatteryOptimizationClick = ::openBatteryOptimizationSettings,
+                        playerTabRequest = playerTabRequest
+                    )
+                }
+            }
+        }
     }
 
     override fun onStart() {
@@ -90,7 +106,18 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
 
-    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent) }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleLaunchIntent(intent)
+    }
+
+    private fun handleLaunchIntent(intent: Intent?) {
+        if (intent != null && intent.action != Intent.ACTION_MAIN) {
+            playerTabRequest++
+        }
+    }
+
     private fun requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val permission = Manifest.permission.POST_NOTIFICATIONS
