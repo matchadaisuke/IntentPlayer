@@ -152,16 +152,6 @@ private fun PlayerTab(viewModel: MainViewModel, onBatteryOptimizationClick: () -
             Spacer(Modifier.height(18.dp))
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Surface(
-                        Modifier.size(190.dp),
-                        shape = MaterialTheme.shapes.extraLarge,
-                        color = MaterialTheme.colorScheme.secondaryContainer
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.GraphicEq, contentDescription = null, modifier = Modifier.size(88.dp))
-                        }
-                    }
-                    Spacer(Modifier.height(24.dp))
                     Text(
                         track?.name ?: "再生するファイルがありません",
                         style = MaterialTheme.typography.titleLarge,
@@ -326,11 +316,7 @@ private fun SpeedSelector(speed: Float, setSpeed: (Float) -> Unit) {
                 onDismissRequest = { expanded = false },
                 modifier = Modifier.width(136.dp)
             ) {
-                Column(
-                    Modifier
-                        .heightIn(max = 360.dp)
-                        .verticalScroll(menuScroll)
-                ) {
+                Column(Modifier.heightIn(max = 360.dp).verticalScroll(menuScroll)) {
                     options.forEach { s ->
                         DropdownMenuItem(
                             text = { Text("${speedText(s)}×") },
@@ -383,7 +369,6 @@ private fun QueueTab(viewModel: MainViewModel) {
 @Composable
 private fun FolderTab(viewModel: MainViewModel, openSaf: () -> Unit, openQueue: () -> Unit) {
     val context = LocalContext.current
-    val currentQueueFolder by viewModel.folderUri.collectAsState()
     val roots = remember { StorageBrowser.roots(context) }
     var root by remember { mutableStateOf<StorageBrowser.Root?>(null) }
     var directory by remember { mutableStateOf<File?>(null) }
@@ -531,15 +516,13 @@ private fun FolderTab(viewModel: MainViewModel, openSaf: () -> Unit, openQueue: 
 
             Surface(tonalElevation = 3.dp) {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
-                    if (currentQueueFolder != null) {
-                        Text(
-                            "現在: ${folderName(currentQueueFolder)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
+                    Text(
+                        "選択対象: ${directory?.absolutePath.orEmpty()}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                     Button(
                         onClick = {
                             val selected = directory ?: return@Button
