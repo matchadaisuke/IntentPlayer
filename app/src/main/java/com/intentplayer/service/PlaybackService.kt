@@ -77,6 +77,7 @@ class PlaybackService : MediaSessionService() {
     private var lastNotificationLayout: ImmutableList<CommandButton>? = null
     private var lastNotificationActionFactory: MediaNotification.ActionFactory? = null
     private var notificationChangedCallback: MediaNotification.Provider.Callback? = null
+    private var notificationTickerJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -113,6 +114,8 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         saveCurrentPosition()
+        notificationTickerJob?.cancel()
+        notificationTickerJob = null
         serviceScope.cancel()
         unregisterReceivers()
         abandonAudioFocus()
@@ -170,11 +173,15 @@ class PlaybackService : MediaSessionService() {
             }
             ControlReceiver.CMD_SEEK -> {
                 val pos = intent.getLongExtra(ControlReceiver.EXTRA_SEEK_TO, -1L)
-                if (pos >= 0) exoPlayer?.seekTo(pos)
+                if (pos >= 0) {
+                    exoPlayer?.seekTo(pos)
+                    refreshMediaPresentation()
+                }
             }
             ControlReceiver.CMD_SPEED -> {
                 val speed = intent.getFloatExtra(ControlReceiver.EXTRA_SPEED, 1.0f)
                 exoPlayer?.setPlaybackSpeed(speed.coerceIn(0.5f, 2.0f))
+                refreshMediaPresentation()
             }
             CMD_APP_VOLUME -> applyVolume(intent.getFloatExtra(EXTRA_APP_VOLUME, 1.0f))
             CMD_CUSTOM_MODE -> applyCustomMediaPlaybackMode(
@@ -257,6 +264,15 @@ class PlaybackService : MediaSessionService() {
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying) requestAudioFocus() else abandonAudioFocus()
+                refreshMediaPresentation()
+                updateNotificationTicker(isPlaying)
+            }
+
+            override fun onPositionDiscontinuity(
+                oldPosition: Player.PositionInfo,
+                newPosition: Player.PositionInfo,
+                reason: Int
+            ) {
                 refreshMediaPresentation()
             }
 
@@ -356,11 +372,13 @@ class PlaybackService : MediaSessionService() {
                 lastNotificationLayout = customLayout
                 lastNotificationActionFactory = actionFactory
                 notificationChangedCallback = onNotificationChangedCallback
-                return if (PreferencesManager.isUseCustomMediaPlayback(this@PlaybackService)) {
+                val created = if (PreferencesManager.isUseCustomMediaPlayback(this@PlaybackService)) {
                     MediaNotification(FOREGROUND_NOTIFICATION_ID, buildSilentPlaybackNotification())
                 } else {
                     delegate.createNotification(mediaSession, customLayout, actionFactory, onNotificationChangedCallback)
                 }
+                applyRemainingTime(created.notification)
+                return created
             }
 
             override fun handleCustomCommand(
@@ -387,6 +405,7 @@ class PlaybackService : MediaSessionService() {
             }
             if (refreshed != null) {
                 try {
+                    applyRemainingTime(refreshed.notification)
                     callback.onNotificationChanged(refreshed)
                 } catch (e: Exception) {
                     Log.w(TAG, "Media3 notification callback refresh failed: ${e.message}")
@@ -405,7 +424,7 @@ class PlaybackService : MediaSessionService() {
         val total = playlist.size
         val indexText = if (total > 0) "[${idx + 1}/$total]" else ""
         val isPlaying = player?.isPlaying == true
-        val statusText = if (isPlaying) "再生中" else "一時停止中"
+        val remainingText = buildRemainingTimeText()
         val tapIntent = PendingIntent.getActivity(
             this,
             0,
@@ -426,7 +445,7 @@ class PlaybackService : MediaSessionService() {
         val builder = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("$indexText $title".trim())
-            .setContentText(statusText)
+            .setContentText(remainingText)
             .setContentIntent(tapIntent)
             .addAction(0, "前へ", buildActionIntent(ControlReceiver.CMD_PREVIOUS))
             .addAction(0, if (isPlaying) "一時停止" else "再生", buildActionIntent(if (isPlaying) ControlReceiver.CMD_PAUSE else ControlReceiver.CMD_PLAY))
@@ -437,6 +456,63 @@ class PlaybackService : MediaSessionService() {
             .setSilent(true)
         loadArtworkBitmap(metadata?.artworkUri)?.let(builder::setLargeIcon)
         return builder.build()
+    }
+
+    private fun updateNotificationTicker(isPlaying: Boolean) {
+        notificationTickerJob?.cancel()
+        notificationTickerJob = null
+        if (!isPlaying) return
+        notificationTickerJob = serviceScope.launch {
+            while (isActive && exoPlayer?.isPlaying == true) {
+                delay(NOTIFICATION_REMAINING_UPDATE_INTERVAL_MS)
+                refreshMediaPresentation()
+            }
+        }
+    }
+
+    private fun calculateRemainingTimesMs(): Pair<Long, Long> {
+        val player = exoPlayer ?: return 0L to 0L
+        if (player.mediaItemCount <= 0) return 0L to 0L
+
+        val index = player.currentMediaItemIndex.coerceAtLeast(0)
+        val currentDurationMs = player.duration.takeIf { it > 0L }
+            ?: playlist.getOrNull(index)?.durationMs?.takeIf { it > 0L }
+            ?: 0L
+        val currentPositionMs = player.currentPosition.coerceAtLeast(0L)
+        val currentRemainingMediaMs = (currentDurationMs - currentPositionMs).coerceAtLeast(0L)
+        val followingMediaMs = if (index + 1 < playlist.size) {
+            playlist.subList(index + 1, playlist.size).sumOf { it.durationMs.coerceAtLeast(0L) }
+        } else {
+            0L
+        }
+
+        val speed = player.playbackParameters.speed.takeIf { it > 0f } ?: 1f
+        val fileRemainingMs = (currentRemainingMediaMs / speed).toLong().coerceAtLeast(0L)
+        val folderRemainingMs = ((currentRemainingMediaMs + followingMediaMs) / speed)
+            .toLong()
+            .coerceAtLeast(0L)
+        return fileRemainingMs to folderRemainingMs
+    }
+
+    private fun buildRemainingTimeText(): String {
+        val (fileRemainingMs, folderRemainingMs) = calculateRemainingTimesMs()
+        return "残り: ${formatRemainingClock(fileRemainingMs)}・${formatRemainingClock(folderRemainingMs)}"
+    }
+
+    private fun formatRemainingClock(ms: Long): String {
+        val totalSeconds = ((ms.coerceAtLeast(0L) + 999L) / 1000L)
+        val hours = totalSeconds / 3600L
+        val minutes = (totalSeconds % 3600L) / 60L
+        val seconds = totalSeconds % 60L
+        return if (hours > 0L) {
+            "$hours:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
+        } else {
+            "${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
+        }
+    }
+
+    private fun applyRemainingTime(notification: Notification) {
+        notification.extras.putCharSequence(Notification.EXTRA_TEXT, buildRemainingTimeText())
     }
 
     private fun loadArtworkBitmap(uri: Uri?): Bitmap? {
@@ -895,6 +971,7 @@ class PlaybackService : MediaSessionService() {
         private const val EXTRA_APP_VOLUME = "volume"
         private const val POSITION_SAVE_INTERVAL_MS = 5_000L
         private const val STATE_BROADCAST_INTERVAL_MS = 500L
+        private const val NOTIFICATION_REMAINING_UPDATE_INTERVAL_MS = 1_000L
         private const val MUTE_MONITOR_INTERVAL_MS = 500L
         private const val MAX_CONSECUTIVE_ERRORS = 3
         private const val MAX_LOUDNESS_GAIN_MB = 1_400
