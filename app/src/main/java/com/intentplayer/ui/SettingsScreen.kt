@@ -21,6 +21,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -132,9 +133,17 @@ fun SettingsScreen(viewModel: MainViewModel) {
         )
     }
 
-    Scaffold(topBar = { TopAppBar(title = { Text("設定") }) }) { padding ->
+    Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        topBar = { TopAppBar(title = { Text("設定") }) }
+    ) { padding ->
         Column(
-            Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .consumeWindowInsets(padding)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp)
         ) {
             Category(Icons.Default.PlayCircle, "再生")
             SwitchRow(
@@ -209,7 +218,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
             LinkRow(
                 Icons.Default.AdminPanelSettings,
                 "すべてのファイルへのアクセス",
-                if (allFilesAllowed()) "許可されています。端末内のファイルをスキャンできます。" else "未許可です。Androidの設定からIntentPlayerにすべてのファイルへのアクセスを許可してください。SAFでもフォルダを選べます。",
+                if (allFilesAllowed()) "許可されています。端末内のファイルをスキャンできます。" else "未許可です。必要な場合はここを押してAndroidの設定を開いてください。自動では設定画面を開きません。SAFでもフォルダを選べます。",
                 if (allFilesAllowed()) "許可済み" else "設定"
             ) { openAllFilesSettings(context) }
             LinkRow(
@@ -260,7 +269,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
                     Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 4.dp))
                 }
             }
-            Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.height(8.dp))
         }
     }
 }
@@ -340,7 +349,9 @@ private fun DurationPickerDialog(
     onConfirm: (Long) -> Unit
 ) {
     var selectedMs by remember(initialMs) { mutableLongStateOf(initialMs.coerceIn(minMs, maxMs)) }
+    val pickerTextColor = MaterialTheme.colorScheme.onSurface.toArgb()
     AlertDialog(
+        modifier = Modifier.widthIn(max = 390.dp),
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
@@ -348,9 +359,24 @@ private fun DurationPickerDialog(
                 Text("時　　分　　秒", style = MaterialTheme.typography.labelMedium)
                 AndroidView(
                     factory = { ctx ->
-                        val hour = NumberPicker(ctx).apply { minValue = 0; maxValue = 24; wrapSelectorWheel = false }
-                        val minute = NumberPicker(ctx).apply { minValue = 0; maxValue = 59; wrapSelectorWheel = true }
-                        val second = NumberPicker(ctx).apply { minValue = 0; maxValue = 59; wrapSelectorWheel = true }
+                        val hour = NumberPicker(ctx).apply {
+                            minValue = 0
+                            maxValue = 24
+                            wrapSelectorWheel = false
+                            applyNumberPickerTextColor(this, pickerTextColor)
+                        }
+                        val minute = NumberPicker(ctx).apply {
+                            minValue = 0
+                            maxValue = 59
+                            wrapSelectorWheel = true
+                            applyNumberPickerTextColor(this, pickerTextColor)
+                        }
+                        val second = NumberPicker(ctx).apply {
+                            minValue = 0
+                            maxValue = 59
+                            wrapSelectorWheel = true
+                            applyNumberPickerTextColor(this, pickerTextColor)
+                        }
                         fun update() {
                             if (hour.value == 24) {
                                 minute.value = 0
@@ -393,7 +419,9 @@ private fun MillisecondPickerDialog(
     onConfirm: (Int) -> Unit
 ) {
     var selected by remember(initialMs) { mutableIntStateOf(initialMs.coerceIn(0, maxMs)) }
+    val pickerTextColor = MaterialTheme.colorScheme.onSurface.toArgb()
     AlertDialog(
+        modifier = Modifier.widthIn(max = 360.dp),
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
@@ -401,12 +429,18 @@ private fun MillisecondPickerDialog(
                 Text("秒　　 ミリ秒", style = MaterialTheme.typography.labelMedium)
                 AndroidView(
                     factory = { ctx ->
-                        val seconds = NumberPicker(ctx).apply { minValue = 0; maxValue = maxMs / 1000; wrapSelectorWheel = false }
+                        val seconds = NumberPicker(ctx).apply {
+                            minValue = 0
+                            maxValue = maxMs / 1000
+                            wrapSelectorWheel = false
+                            applyNumberPickerTextColor(this, pickerTextColor)
+                        }
                         val millis = NumberPicker(ctx).apply {
                             minValue = 0
                             maxValue = 99
                             displayedValues = Array(100) { (it * 10).toString().padStart(3, '0') }
                             wrapSelectorWheel = true
+                            applyNumberPickerTextColor(this, pickerTextColor)
                         }
                         seconds.value = initialMs.coerceIn(0, maxMs) / 1000
                         millis.value = (initialMs.coerceIn(0, maxMs) % 1000) / 10
@@ -438,6 +472,7 @@ private fun MillisecondPickerDialog(
 private fun LicenseScreen(back: () -> Unit) {
     val context = LocalContext.current
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text("ライセンス情報") },
@@ -445,7 +480,14 @@ private fun LicenseScreen(back: () -> Unit) {
             )
         }
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp)) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .consumeWindowInsets(padding)
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp)
+        ) {
             Text("IntentPlayer", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Text("MIT License\nCopyright © 2026 matchadaisuke", modifier = Modifier.padding(vertical = 8.dp))
             TextButton({ openUrl(context, LICENSE_URL) }) { Text("MIT License全文をGitHubで表示") }
