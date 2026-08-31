@@ -2,49 +2,15 @@ package com.intentplayer.ui
 
 import android.net.Uri
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Audiotrack
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Build
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Slider
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -57,13 +23,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.intentplayer.model.Track
+import com.intentplayer.storage.PreferencesManager
 
-/**
- * MainScreen
- * メイン画面。
- * 通知権限が拒否されているとロック画面・BT通知が出ないため、
- * ユーザーに設定画面への案内を表示する。
- */
 @Composable
 fun MainScreen(
     viewModel: MainViewModel,
@@ -71,34 +32,21 @@ fun MainScreen(
     onBatteryOptimizationClick: () -> Unit
 ) {
     val currentScreen by viewModel.currentScreen.collectAsState()
-
     when (currentScreen) {
-        MainViewModel.AppScreen.ONBOARDING -> {
-            OnboardingScreen(
-                viewModel = viewModel,
-                onSelectFolderClick = onSelectFolderClick,
-                onBatteryOptimizationClick = onBatteryOptimizationClick
-            )
-        }
+        MainViewModel.AppScreen.ONBOARDING -> OnboardingScreen(
+            viewModel = viewModel,
+            onSelectFolderClick = onSelectFolderClick,
+            onBatteryOptimizationClick = onBatteryOptimizationClick
+        )
         MainViewModel.AppScreen.SETTINGS -> {
             BackHandler { viewModel.navigateTo(MainViewModel.AppScreen.MAIN) }
-            SettingsScreen(viewModel = viewModel)
+            SettingsScreen(viewModel)
         }
-        MainViewModel.AppScreen.DIAGNOSIS -> {
-            BackHandler { viewModel.navigateTo(MainViewModel.AppScreen.MAIN) }
-            DiagnosisScreen(
-                viewModel = viewModel,
-                onSelectFolderClick = onSelectFolderClick,
-                onBatteryOptimizationClick = onBatteryOptimizationClick
-            )
-        }
-        MainViewModel.AppScreen.MAIN -> {
-            MainScreenContent(
-                viewModel = viewModel,
-                onSelectFolderClick = onSelectFolderClick,
-                onBatteryOptimizationClick = onBatteryOptimizationClick
-            )
-        }
+        MainViewModel.AppScreen.MAIN -> MainScreenContent(
+            viewModel,
+            onSelectFolderClick,
+            onBatteryOptimizationClick
+        )
     }
 }
 
@@ -119,15 +67,10 @@ fun MainScreenContent(
     val playbackSpeed by viewModel.playbackSpeed.collectAsState()
     val enableAppVolume by viewModel.enableAppVolume.collectAsState()
     val appPlaybackVolume by viewModel.appPlaybackVolume.collectAsState()
-
     val isBatteryOptimized by viewModel.isBatteryOptimized.collectAsState()
-    // 通知権限拒否状態
     val isNotificationPermissionDenied by viewModel.isNotificationPermissionDenied.collectAsState()
 
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background
-    ) {
+    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -140,53 +83,28 @@ fun MainScreenContent(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Audiotrack,
-                        contentDescription = null,
-                        modifier = Modifier.size(32.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "IntentPlayer",
-                        style = MaterialTheme.typography.headlineMedium
-                    )
+                    Icon(Icons.Default.Audiotrack, null, modifier = Modifier.size(32.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("IntentPlayer", style = MaterialTheme.typography.headlineMedium)
                 }
-                Row {
-                    IconButton(onClick = { viewModel.navigateTo(MainViewModel.AppScreen.DIAGNOSIS) }) {
-                        Icon(Icons.Default.Build, contentDescription = "自己診断")
-                    }
-                    IconButton(onClick = { viewModel.navigateTo(MainViewModel.AppScreen.SETTINGS) }) {
-                        Icon(Icons.Default.Settings, contentDescription = "設定")
-                    }
+                IconButton(onClick = { viewModel.navigateTo(MainViewModel.AppScreen.SETTINGS) }) {
+                    Icon(Icons.Default.Settings, contentDescription = "設定")
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // 通知権限拒否バナー（ロック画面・BT通知が出ない原因として最重要）
+            Spacer(Modifier.height(16.dp))
             if (isNotificationPermissionDenied) {
                 NotificationPermissionBanner()
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(Modifier.height(8.dp))
             }
-
-            // バッテリー最適化バナー（未設定の場合のみ表示）
             if (isBatteryOptimized) {
-                BatteryOptimizationBanner(
-                    onClickOptimize = onBatteryOptimizationClick
-                )
-                Spacer(modifier = Modifier.height(8.dp))
+                BatteryOptimizationBanner(onBatteryOptimizationClick)
+                Spacer(Modifier.height(8.dp))
             }
 
-            // ----- フォルダ選択 -----
-            FolderSection(
-                folderUri = folderUri,
-                onSelectFolderClick = onSelectFolderClick
-            )
+            FolderSection(folderUri, onSelectFolderClick)
+            Spacer(Modifier.height(16.dp))
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // ----- 再生コントロール -----
             NowPlayingSection(
                 currentTrack = currentTrack,
                 isPlaying = isPlaying,
@@ -195,217 +113,105 @@ fun MainScreenContent(
                 playbackSpeed = playbackSpeed,
                 enableAppVolume = enableAppVolume,
                 appPlaybackVolume = appPlaybackVolume,
-                onVolumeChange = { volume -> viewModel.setAppPlaybackVolume(volume) },
-                onPauseResumeClick = {
-                    if (isPlaying) viewModel.pause() else viewModel.resume()
-                },
-                onStopClick = { viewModel.stop() },
-                onNextClick = { viewModel.next() },
-                onPreviousClick = { viewModel.previous() },
-                onSeekTo = { positionMs -> viewModel.seekTo(positionMs) },
-                onSpeedSelected = { speed -> viewModel.setPlaybackSpeed(speed) }
+                onVolumeChange = viewModel::setAppPlaybackVolume,
+                onPauseResumeClick = { if (isPlaying) viewModel.pause() else viewModel.resume() },
+                onStopClick = viewModel::stop,
+                onNextClick = viewModel::next,
+                onPreviousClick = viewModel::previous,
+                onSeekTo = viewModel::seekTo,
+                onSpeedSelected = viewModel::setPlaybackSpeed
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // ----- エラーメッセージ（「閉じる」ボタン追加） -----
+            Spacer(Modifier.height(16.dp))
             uiMessage?.let { message ->
                 Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer
-                    ),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                        modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = message,
-                            modifier = Modifier.weight(1f),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onErrorContainer
-                        )
-                        // 「閉じる」ボタン追加
-                        IconButton(
-                            onClick = { viewModel.clearUiMessage() }
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "閉じる",
-                                tint = MaterialTheme.colorScheme.onErrorContainer
-                            )
+                        Text(message, modifier = Modifier.weight(1f))
+                        IconButton(onClick = viewModel::clearUiMessage) {
+                            Icon(Icons.Default.Close, contentDescription = "閉じる")
                         }
                     }
                 }
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(Modifier.height(8.dp))
             }
 
-            // ----- トラックリスト -----
-            TrackListSection(
-                tracks = tracks,
-                currentTrack = currentTrack,
-                isScanning = isScanning,
-                onTrackClick = { index -> viewModel.playTrack(index) }
-            )
+            TrackListSection(tracks, currentTrack, isScanning, viewModel::playTrack)
         }
     }
 }
 
-// ==========================================
-// 通知権限拒否バナー
-// ==========================================
-
-/**
- * 通知権限が拒否されている場合に表示するバナー。
- *
- * POST_NOTIFICATIONS が拒否されると:
- *   - ロック画面に再生情報が出ない
- *   - Bluetooth デバイスに曲名が送出されない
- *   - 通知欄の再生コントロールが表示されない
- *
- * ユーザーに設定画面への案内を表示する。
- * （システム設定への Intent は Activity が必要なため、ここでは案内のみ）
- */
 @Composable
 private fun NotificationPermissionBanner() {
     Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer
-        ),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.Notifications,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.onErrorContainer
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "通知権限が拒否されています",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onErrorContainer
-                )
+                Icon(Icons.Default.Notifications, null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("通知権限が拒否されています", style = MaterialTheme.typography.labelMedium)
             }
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(Modifier.height(4.dp))
             Text(
-                text = "通知権限がないとロック画面・Bluetoothデバイスへの再生情報表示ができません。" +
-                        "設定 → アプリ → IntentPlayer → 通知 から許可してください。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onErrorContainer
+                "通知権限がないとロック画面・Bluetoothデバイスへの再生情報表示ができません。設定から許可してください。",
+                style = MaterialTheme.typography.bodySmall
             )
         }
     }
 }
 
-// ==========================================
-// バッテリー最適化バナー
-// ==========================================
-
-/**
- * バッテリー最適化が有効な場合に表示するバナー。
- * バックグラウンド再生中に Service が止まる可能性をユーザーに案内する。
- */
 @Composable
-private fun BatteryOptimizationBanner(
-    onClickOptimize: () -> Unit
-) {
+private fun BatteryOptimizationBanner(onClickOptimize: () -> Unit) {
     Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.tertiaryContainer
-        ),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.Warning,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.onTertiaryContainer
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "バッテリー最適化が有効です",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer
-                )
+                Icon(Icons.Default.Warning, null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("バッテリー最適化が有効です", style = MaterialTheme.typography.labelMedium)
             }
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "バックグラウンド再生中に音楽が止まる場合があります。" +
-                        "「最適化しない」に設定すると安定して再生できます。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onTertiaryContainer
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            OutlinedButton(
-                onClick = onClickOptimize
-            ) {
-                Text("バッテリー最適化を無効にする")
-            }
+            Spacer(Modifier.height(4.dp))
+            Text("バックグラウンド再生が停止する場合があります。", style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(onClickOptimize) { Text("バッテリー最適化を無効にする") }
         }
     }
 }
 
-// ==========================================
-// フォルダセクション
-// ==========================================
-
 @Composable
-private fun FolderSection(
-    folderUri: Uri?,
-    onSelectFolderClick: () -> Unit
-) {
+private fun FolderSection(folderUri: Uri?, onSelectFolderClick: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(
-                text = "フォルダ",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-
+        Column(Modifier.padding(12.dp)) {
+            Text("フォルダ", style = MaterialTheme.typography.labelMedium)
+            Spacer(Modifier.height(4.dp))
             if (folderUri != null) {
-                val displayPath = folderUri.lastPathSegment ?: folderUri.toString()
                 Text(
-                    text = displayPath,
-                    style = MaterialTheme.typography.bodyMedium,
+                    folderUri.lastPathSegment ?: folderUri.toString(),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedButton(onClick = onSelectFolderClick) {
-                    Text("フォルダを変更")
-                }
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(onSelectFolderClick) { Text("フォルダを変更") }
             } else {
-                Text(
-                    text = "フォルダが選択されていません",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(onClick = onSelectFolderClick) {
-                    Text("フォルダを選択")
-                }
+                Text("フォルダが選択されていません")
+                Spacer(Modifier.height(8.dp))
+                Button(onSelectFolderClick) { Text("フォルダを選択") }
             }
         }
     }
 }
-
-// ==========================================
-// 再生コントロールセクション
-// ==========================================
 
 @Composable
 private fun NowPlayingSection(
@@ -427,124 +233,67 @@ private fun NowPlayingSection(
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = if (currentTrack != null)
-                MaterialTheme.colorScheme.primaryContainer
-            else
-                MaterialTheme.colorScheme.surfaceVariant
+            containerColor = if (currentTrack != null) MaterialTheme.colorScheme.primaryContainer
+            else MaterialTheme.colorScheme.surfaceVariant
         )
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(Modifier.padding(12.dp)) {
+            Text("再生中", style = MaterialTheme.typography.labelMedium)
+            Spacer(Modifier.height(4.dp))
+            Text(currentTrack?.name ?: "（なし）", maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(12.dp))
 
-            Text(
-                text = "再生中",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = currentTrack?.name ?: "（なし）",
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            SeekBarSection(
-                currentPositionMs = currentPositionMs,
-                durationMs = durationMs,
-                enabled = currentTrack != null && durationMs > 0,
-                onSeekTo = onSeekTo
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
+            SeekBarSection(currentPositionMs, durationMs, currentTrack != null && durationMs > 0, onSeekTo)
+            Spacer(Modifier.height(8.dp))
 
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                OutlinedButton(
-                    onClick = onPreviousClick,
-                    enabled = currentTrack != null
-                ) {
+                OutlinedButton(onPreviousClick, enabled = currentTrack != null) {
                     Icon(Icons.Default.SkipPrevious, contentDescription = "前へ")
                 }
-
                 Button(
                     onClick = onPauseResumeClick,
                     enabled = currentTrack != null,
                     modifier = Modifier.weight(1f)
                 ) {
                     Icon(
-                        imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                         contentDescription = if (isPlaying) "一時停止" else "再生"
                     )
                 }
-
-                OutlinedButton(
-                    onClick = onNextClick,
-                    enabled = currentTrack != null
-                ) {
+                OutlinedButton(onNextClick, enabled = currentTrack != null) {
                     Icon(Icons.Default.SkipNext, contentDescription = "次へ")
                 }
-
-                OutlinedButton(
-                    onClick = onStopClick,
-                    enabled = currentTrack != null
-                ) {
+                OutlinedButton(onStopClick, enabled = currentTrack != null) {
                     Icon(Icons.Default.Stop, contentDescription = "停止")
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            SpeedSelector(
-                currentSpeed = playbackSpeed,
-                onSpeedSelected = onSpeedSelected
-            )
-
+            Spacer(Modifier.height(8.dp))
+            SpeedSelector(playbackSpeed, onSpeedSelected)
             if (enableAppVolume) {
-                Spacer(modifier = Modifier.height(12.dp))
-                VolumeSliderSection(
-                    volume = appPlaybackVolume,
-                    enabled = currentTrack != null,
-                    onVolumeChange = onVolumeChange
-                )
+                Spacer(Modifier.height(12.dp))
+                VolumeSliderSection(appPlaybackVolume, currentTrack != null, onVolumeChange)
             }
         }
     }
 }
 
 @Composable
-private fun VolumeSliderSection(
-    volume: Float,
-    enabled: Boolean,
-    onVolumeChange: (Float) -> Unit
-) {
+private fun VolumeSliderSection(volume: Float, enabled: Boolean, onVolumeChange: (Float) -> Unit) {
     Column {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "アプリ独自の音量",
-                style = MaterialTheme.typography.bodySmall,
-                color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
-            )
-            val percentage = (volume * 100).toInt()
-            Text(
-                text = "$percentage%",
-                style = MaterialTheme.typography.bodySmall,
-                color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
-            )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("アプリ独自の音量", style = MaterialTheme.typography.bodySmall)
+            Text("${(volume * 100).toInt()}%", style = MaterialTheme.typography.bodySmall)
         }
         Slider(
-            value = volume,
-            onValueChange = { onVolumeChange(it) },
-            valueRange = 0f..1.0f,
-            steps = 19,
+            value = volume.coerceIn(0f, PreferencesManager.MAX_APP_PLAYBACK_VOLUME),
+            onValueChange = onVolumeChange,
+            valueRange = 0f..PreferencesManager.MAX_APP_PLAYBACK_VOLUME,
+            steps = 39,
             enabled = enabled,
             modifier = Modifier.fillMaxWidth()
         )
@@ -562,20 +311,13 @@ private fun SeekBarSection(
     var dragValue by remember { mutableStateOf(0f) }
     val interactionSource = remember { MutableInteractionSource() }
 
-    // タッチキャンセル（通知パネル展開・着信等）で onValueChangeFinished が
-    // 呼ばれない場合でも isDragging をリセットする。
-    // DragInteraction.Cancel を検知することで確実にリセットできる。
     LaunchedEffect(interactionSource) {
         interactionSource.interactions.collect { interaction ->
-            if (interaction is DragInteraction.Cancel ||
-                interaction is DragInteraction.Stop
-            ) {
+            if (interaction is DragInteraction.Cancel || interaction is DragInteraction.Stop) {
                 isDragging = false
             }
         }
     }
-
-    // 曲停止・切り替え時のフォールバックリセット（durationMs=0 になった瞬間）
     LaunchedEffect(enabled) {
         if (!enabled) {
             isDragging = false
@@ -583,85 +325,44 @@ private fun SeekBarSection(
         }
     }
 
-    val sliderValue = if (isDragging) {
-        dragValue
-    } else {
-        if (durationMs > 0) currentPositionMs.toFloat() / durationMs.toFloat() else 0f
-    }
+    val sliderValue = if (isDragging) dragValue
+    else if (durationMs > 0) currentPositionMs.toFloat() / durationMs.toFloat() else 0f
 
     Column {
         Slider(
             value = sliderValue.coerceIn(0f, 1f),
-            onValueChange = { value ->
+            onValueChange = {
                 isDragging = true
-                dragValue = value
+                dragValue = it
             },
             onValueChangeFinished = {
                 isDragging = false
-                if (durationMs > 0) {
-                    val seekMs = (dragValue * durationMs).toLong()
-                    onSeekTo(seekMs)
-                }
+                if (durationMs > 0) onSeekTo((dragValue * durationMs).toLong())
             },
             enabled = enabled,
             interactionSource = interactionSource,
             modifier = Modifier.fillMaxWidth()
         )
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                text = formatTime(currentPositionMs),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = formatTime(durationMs),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(formatTime(currentPositionMs), style = MaterialTheme.typography.bodySmall)
+            Text(formatTime(durationMs), style = MaterialTheme.typography.bodySmall)
         }
     }
 }
 
 @Composable
-private fun SpeedSelector(
-    currentSpeed: Float,
-    onSpeedSelected: (Float) -> Unit
-) {
-    val speedOptions = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f)
+private fun SpeedSelector(currentSpeed: Float, onSpeedSelected: (Float) -> Unit) {
+    val options = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f)
     var expanded by remember { mutableStateOf(false) }
-
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            text = "再生速度:",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-
+        Text("再生速度:", style = MaterialTheme.typography.bodySmall)
+        Spacer(Modifier.width(8.dp))
         Box {
-            OutlinedButton(onClick = { expanded = true }) {
-                Text("${formatSpeed(currentSpeed)}x")
-            }
-
-            DropdownMenu(
-                expanded = expanded,
-                onDismissRequest = { expanded = false }
-            ) {
-                speedOptions.forEach { speed ->
+            OutlinedButton(onClick = { expanded = true }) { Text("${formatSpeed(currentSpeed)}x") }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                options.forEach { speed ->
                     DropdownMenuItem(
-                        text = {
-                            Text(
-                                text = "${formatSpeed(speed)}x",
-                                color = if (speed == currentSpeed)
-                                    MaterialTheme.colorScheme.primary
-                                else
-                                    MaterialTheme.colorScheme.onSurface
-                            )
-                        },
+                        text = { Text("${formatSpeed(speed)}x") },
                         onClick = {
                             onSpeedSelected(speed)
                             expanded = false
@@ -673,10 +374,6 @@ private fun SpeedSelector(
     }
 }
 
-// ==========================================
-// トラックリスト
-// ==========================================
-
 @Composable
 private fun TrackListSection(
     tracks: List<Track>,
@@ -684,67 +381,25 @@ private fun TrackListSection(
     isScanning: Boolean,
     onTrackClick: (Int) -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(text = "曲一覧", style = MaterialTheme.typography.titleSmall)
-            if (tracks.isNotEmpty()) {
-                Text(
-                    text = "${tracks.size}曲",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+    Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("曲一覧", style = MaterialTheme.typography.titleSmall)
+            if (tracks.isNotEmpty()) Text("${tracks.size}曲", style = MaterialTheme.typography.bodySmall)
         }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
+        Spacer(Modifier.height(8.dp))
         when {
-            isScanning -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(120.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator()
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("スキャン中...", style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-            }
-
-            tracks.isEmpty() -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(80.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "フォルダを選択してください",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            else -> {
-                LazyColumn {
-                    itemsIndexed(tracks) { index, track ->
-                        TrackItem(
-                            track = track,
-                            isPlaying = track.uri == currentTrack?.uri,
-                            onClick = { onTrackClick(index) }
-                        )
-                        if (index < tracks.lastIndex) {
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                        }
-                    }
+            isScanning -> Box(
+                Modifier.fillMaxWidth().height(120.dp),
+                contentAlignment = Alignment.Center
+            ) { CircularProgressIndicator() }
+            tracks.isEmpty() -> Box(
+                Modifier.fillMaxWidth().height(80.dp),
+                contentAlignment = Alignment.Center
+            ) { Text("フォルダを選択してください") }
+            else -> LazyColumn {
+                itemsIndexed(tracks) { index, track ->
+                    TrackItem(track, track.uri == currentTrack?.uri) { onTrackClick(index) }
+                    if (index < tracks.lastIndex) HorizontalDivider()
                 }
             }
         }
@@ -752,66 +407,28 @@ private fun TrackListSection(
 }
 
 @Composable
-private fun TrackItem(
-    track: Track,
-    isPlaying: Boolean,
-    onClick: () -> Unit
-) {
+private fun TrackItem(track: Track, isPlaying: Boolean, onClick: () -> Unit) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() }
-            .padding(horizontal = 4.dp, vertical = 12.dp),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 4.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(modifier = Modifier.size(24.dp), contentAlignment = Alignment.Center) {
-            if (isPlaying) {
-                Icon(
-                    imageVector = Icons.Default.PlayArrow,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(16.dp)
-                )
-            }
+        Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+            if (isPlaying) Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(16.dp))
         }
-        Spacer(modifier = Modifier.width(8.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = track.name,
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (isPlaying) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onBackground,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = track.fileName,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(track.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(track.fileName, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
-
-// ==========================================
-// ユーティリティ関数
-// ==========================================
 
 private fun formatTime(ms: Long): String {
     if (ms <= 0L) return "0:00"
     val totalSeconds = ms / 1000
-    val minutes = totalSeconds / 60
-    val seconds = totalSeconds % 60
-    return "$minutes:${seconds.toString().padStart(2, '0')}"
+    return "${totalSeconds / 60}:${(totalSeconds % 60).toString().padStart(2, '0')}"
 }
 
-private fun formatSpeed(speed: Float): String {
-    return if (speed == speed.toLong().toFloat()) {
-        speed.toLong().toString()
-    } else {
-        speed.toString().trimEnd('0').trimEnd('.')
-            .let { if (it.contains('.')) it else "$it.0" }
-    }
-}
+private fun formatSpeed(speed: Float): String =
+    if (speed == speed.toLong().toFloat()) speed.toLong().toString()
+    else speed.toString().trimEnd('0').trimEnd('.')
