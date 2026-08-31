@@ -690,7 +690,14 @@ class PlaybackService : MediaSessionService() {
     private fun currentOutputRouteKey(): String {
         val external = externalOutputDevices()
         if (external.isEmpty()) return "speaker"
-        return external.map { "${it.type}:${runCatching { it.address }.getOrDefault("")}" }.sorted().joinToString("|")
+        return external.map { device ->
+            val address = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                runCatching { device.address }.getOrDefault("")
+            } else {
+                ""
+            }
+            "${device.type}:$address"
+        }.sorted().joinToString("|")
     }
 
     private fun isMusicStreamMuted(): Boolean {
