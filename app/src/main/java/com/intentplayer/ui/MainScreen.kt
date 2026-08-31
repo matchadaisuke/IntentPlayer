@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -298,22 +299,28 @@ private fun FolderTab(viewModel: MainViewModel, openSaf: () -> Unit, openQueue: 
     val permissionGranted = remember(refreshKey) { allFilesAllowed() }
     val entriesResult = remember(directory, refreshKey) { directory?.let(StorageBrowser::list) }
 
+    fun navigateUp() {
+        val current = directory ?: return
+        val activeRoot = root?.file
+        if (activeRoot != null && sameFile(current, activeRoot)) {
+            directory = null
+            root = null
+        } else {
+            directory = current.parentFile ?: activeRoot
+        }
+    }
+
+    BackHandler(enabled = directory != null) {
+        navigateUp()
+    }
+
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (directory != null) {
-                IconButton(onClick = {
-                    val current = directory ?: return@IconButton
-                    val activeRoot = root?.file
-                    if (activeRoot != null && sameFile(current, activeRoot)) {
-                        directory = null
-                        root = null
-                    } else {
-                        directory = current.parentFile ?: activeRoot
-                    }
-                }) { Icon(Icons.Default.ArrowBack, "戻る") }
+                IconButton(onClick = ::navigateUp) { Icon(Icons.Default.ArrowBack, "戻る") }
             }
             Column(Modifier.weight(1f)) {
                 Text("フォルダ", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
