@@ -36,10 +36,12 @@ fun MainScreen(viewModel: MainViewModel, onSelectFolderClick: () -> Unit, onBatt
     }
 
     val folderUri by viewModel.folderUri.collectAsState()
+    val currentTrack by viewModel.currentTrack.collectAsState()
     var tab by remember(screen) {
         mutableStateOf(
             if (screen == MainViewModel.AppScreen.SETTINGS) MainTab.SETTINGS
             else if (folderUri == null) MainTab.FOLDERS
+            else if (currentTrack == null) MainTab.QUEUE
             else MainTab.PLAYER
         )
     }
