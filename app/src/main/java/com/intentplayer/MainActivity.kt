@@ -1,7 +1,10 @@
 package com.intentplayer
 
 import android.Manifest
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -20,6 +23,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import com.intentplayer.service.PlaybackService
 import com.intentplayer.storage.BatteryOptimizationHelper
 import com.intentplayer.storage.PreferencesManager
 import com.intentplayer.ui.MainScreen
@@ -29,6 +33,16 @@ import com.intentplayer.ui.theme.IntentPlayerTheme
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
     private var lastExitBackAtMs = 0L
+
+    private val playbackErrorReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action != PlaybackService.ACTION_ERROR) return
+            val message = intent.getStringExtra(PlaybackService.EXTRA_ERROR_MESSAGE)
+                ?.takeIf { it.isNotBlank() }
+                ?: return
+            Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show()
+        }
+    }
 
     private val folderPickerLauncher = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
         if (uri == null) return@registerForActivityResult
@@ -60,6 +74,22 @@ class MainActivity : ComponentActivity() {
         }
         setContent { IntentPlayerTheme { Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { MainScreen(viewModel, { folderPickerLauncher.launch(null) }, ::openBatteryOptimizationSettings) } } }
     }
+
+    override fun onStart() {
+        super.onStart()
+        val filter = IntentFilter(PlaybackService.ACTION_ERROR)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(playbackErrorReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(playbackErrorReceiver, filter)
+        }
+    }
+
+    override fun onStop() {
+        try { unregisterReceiver(playbackErrorReceiver) } catch (_: Exception) {}
+        super.onStop()
+    }
+
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent) }
     private fun requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
