@@ -243,7 +243,13 @@ private fun NowPlayingSection(
             Text(currentTrack?.name ?: "（なし）", maxLines = 2, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(12.dp))
 
-            SeekBarSection(currentPositionMs, durationMs, currentTrack != null && durationMs > 0, onSeekTo)
+            SeekBarSection(
+                currentPositionMs = currentPositionMs,
+                durationMs = durationMs,
+                playbackSpeed = playbackSpeed,
+                enabled = currentTrack != null && durationMs > 0,
+                onSeekTo = onSeekTo
+            )
             Spacer(Modifier.height(8.dp))
 
             Row(
@@ -304,6 +310,7 @@ private fun VolumeSliderSection(volume: Float, enabled: Boolean, onVolumeChange:
 private fun SeekBarSection(
     currentPositionMs: Long,
     durationMs: Long,
+    playbackSpeed: Float,
     enabled: Boolean,
     onSeekTo: (Long) -> Unit
 ) {
@@ -327,6 +334,11 @@ private fun SeekBarSection(
 
     val sliderValue = if (isDragging) dragValue
     else if (durationMs > 0) currentPositionMs.toFloat() / durationMs.toFloat() else 0f
+    val shownPositionMs = if (isDragging && durationMs > 0) (dragValue * durationMs).toLong() else currentPositionMs
+    val safeSpeed = playbackSpeed.takeIf { it > 0f } ?: 1f
+    val remainingMs = if (durationMs > 0) {
+        ((durationMs - shownPositionMs).coerceAtLeast(0L) / safeSpeed).toLong()
+    } else 0L
 
     Column {
         Slider(
@@ -344,9 +356,14 @@ private fun SeekBarSection(
             modifier = Modifier.fillMaxWidth()
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(formatTime(currentPositionMs), style = MaterialTheme.typography.bodySmall)
+            Text(formatTime(shownPositionMs), style = MaterialTheme.typography.bodySmall)
             Text(formatTime(durationMs), style = MaterialTheme.typography.bodySmall)
         }
+        Text(
+            text = "残り: ${formatClockTime(remainingMs)}",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.align(Alignment.End)
+        )
     }
 }
 
@@ -381,10 +398,26 @@ private fun TrackListSection(
     isScanning: Boolean,
     onTrackClick: (Int) -> Unit
 ) {
+    val totalDurationMs = tracks.sumOf { it.durationMs.coerceAtLeast(0L) }
     Column(Modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("再生ファイル一覧", style = MaterialTheme.typography.titleSmall, maxLines = 1)
-            if (tracks.isNotEmpty()) Text("${tracks.size}ファイル", style = MaterialTheme.typography.bodySmall)
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "再生ファイル一覧",
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                modifier = Modifier.weight(1f)
+            )
+            if (tracks.isNotEmpty()) {
+                Text(
+                    "${tracks.size}・合計 ${formatClockTime(totalDurationMs)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1
+                )
+            }
         }
         Spacer(Modifier.height(8.dp))
         when {
@@ -427,6 +460,18 @@ private fun formatTime(ms: Long): String {
     if (ms <= 0L) return "0:00"
     val totalSeconds = ms / 1000
     return "${totalSeconds / 60}:${(totalSeconds % 60).toString().padStart(2, '0')}"
+}
+
+private fun formatClockTime(ms: Long): String {
+    val totalSeconds = ((ms.coerceAtLeast(0L) + 999L) / 1000L)
+    val hours = totalSeconds / 3600L
+    val minutes = (totalSeconds % 3600L) / 60L
+    val seconds = totalSeconds % 60L
+    return if (hours > 0L) {
+        "$hours:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
+    } else {
+        "${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
+    }
 }
 
 private fun formatSpeed(speed: Float): String =
