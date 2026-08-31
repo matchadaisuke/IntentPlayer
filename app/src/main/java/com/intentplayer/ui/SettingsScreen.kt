@@ -21,12 +21,16 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.intentplayer.storage.AppThemeMode
+import com.intentplayer.storage.AppThemePreferences
 import com.intentplayer.storage.PreferencesManager
 import kotlin.math.roundToInt
 
@@ -132,10 +136,24 @@ fun SettingsScreen(viewModel: MainViewModel) {
         )
     }
 
-    Scaffold(topBar = { TopAppBar(title = { Text("設定") }) }) { padding ->
+    Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        topBar = { TopAppBar(title = { Text("設定") }) }
+    ) { padding ->
         Column(
-            Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .consumeWindowInsets(padding)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp)
         ) {
+            Category(Icons.Default.Palette, "表示")
+            ThemeSelector(
+                selected = AppThemePreferences.mode,
+                onSelect = { AppThemePreferences.set(context, it) }
+            )
+
             Category(Icons.Default.PlayCircle, "再生")
             SwitchRow(
                 "独自の再生システムを有効にする",
@@ -209,7 +227,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
             LinkRow(
                 Icons.Default.AdminPanelSettings,
                 "すべてのファイルへのアクセス",
-                if (allFilesAllowed()) "許可されています。端末内のファイルをスキャンできます。" else "未許可です。Androidの設定からIntentPlayerにすべてのファイルへのアクセスを許可してください。SAFでもフォルダを選べます。",
+                if (allFilesAllowed()) "許可されています。端末内のファイルをスキャンできます。" else "未許可です。必要な場合はここを押してAndroidの設定を開いてください。自動では設定画面を開きません。SAFでもフォルダを選べます。",
                 if (allFilesAllowed()) "許可済み" else "設定"
             ) { openAllFilesSettings(context) }
             LinkRow(
@@ -260,9 +278,43 @@ fun SettingsScreen(viewModel: MainViewModel) {
                     Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 4.dp))
                 }
             }
-            Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.height(8.dp))
         }
     }
+}
+
+@Composable
+private fun ThemeSelector(selected: AppThemeMode, onSelect: (AppThemeMode) -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
+        Text("テーマ", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "システムは端末のライト/ダーク設定に合わせます。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(10.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ThemeChip("システム", AppThemeMode.SYSTEM, selected, onSelect, Modifier.weight(1f))
+            ThemeChip("ライト", AppThemeMode.LIGHT, selected, onSelect, Modifier.weight(1f))
+            ThemeChip("ダーク", AppThemeMode.DARK, selected, onSelect, Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun ThemeChip(
+    label: String,
+    mode: AppThemeMode,
+    selected: AppThemeMode,
+    onSelect: (AppThemeMode) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    FilterChip(
+        selected = selected == mode,
+        onClick = { onSelect(mode) },
+        label = { Text(label, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center) },
+        modifier = modifier
+    )
 }
 
 @Composable
@@ -340,17 +392,38 @@ private fun DurationPickerDialog(
     onConfirm: (Long) -> Unit
 ) {
     var selectedMs by remember(initialMs) { mutableLongStateOf(initialMs.coerceIn(minMs, maxMs)) }
+    val pickerTextColor = MaterialTheme.colorScheme.onSurface.toArgb()
     AlertDialog(
+        modifier = Modifier.widthIn(max = 390.dp),
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("時　　分　　秒", style = MaterialTheme.typography.labelMedium)
+                Row(Modifier.fillMaxWidth()) {
+                    PickerHeader("時", Modifier.weight(1f))
+                    PickerHeader("分", Modifier.weight(1f))
+                    PickerHeader("秒", Modifier.weight(1f))
+                }
                 AndroidView(
                     factory = { ctx ->
-                        val hour = NumberPicker(ctx).apply { minValue = 0; maxValue = 24; wrapSelectorWheel = false }
-                        val minute = NumberPicker(ctx).apply { minValue = 0; maxValue = 59; wrapSelectorWheel = true }
-                        val second = NumberPicker(ctx).apply { minValue = 0; maxValue = 59; wrapSelectorWheel = true }
+                        val hour = NumberPicker(ctx).apply {
+                            minValue = 0
+                            maxValue = 24
+                            wrapSelectorWheel = false
+                            applyNumberPickerTextColor(this, pickerTextColor)
+                        }
+                        val minute = NumberPicker(ctx).apply {
+                            minValue = 0
+                            maxValue = 59
+                            wrapSelectorWheel = true
+                            applyNumberPickerTextColor(this, pickerTextColor)
+                        }
+                        val second = NumberPicker(ctx).apply {
+                            minValue = 0
+                            maxValue = 59
+                            wrapSelectorWheel = true
+                            applyNumberPickerTextColor(this, pickerTextColor)
+                        }
                         fun update() {
                             if (hour.value == 24) {
                                 minute.value = 0
@@ -369,9 +442,9 @@ private fun DurationPickerDialog(
                         LinearLayout(ctx).apply {
                             orientation = LinearLayout.HORIZONTAL
                             gravity = android.view.Gravity.CENTER
-                            addView(hour)
-                            addView(minute)
-                            addView(second)
+                            addView(hour, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                            addView(minute, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                            addView(second, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
                         }
                     },
                     modifier = Modifier.fillMaxWidth()
@@ -393,20 +466,31 @@ private fun MillisecondPickerDialog(
     onConfirm: (Int) -> Unit
 ) {
     var selected by remember(initialMs) { mutableIntStateOf(initialMs.coerceIn(0, maxMs)) }
+    val pickerTextColor = MaterialTheme.colorScheme.onSurface.toArgb()
     AlertDialog(
+        modifier = Modifier.widthIn(max = 360.dp),
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("秒　　 ミリ秒", style = MaterialTheme.typography.labelMedium)
+                Row(Modifier.fillMaxWidth()) {
+                    PickerHeader("秒", Modifier.weight(1f))
+                    PickerHeader("ミリ秒", Modifier.weight(1f))
+                }
                 AndroidView(
                     factory = { ctx ->
-                        val seconds = NumberPicker(ctx).apply { minValue = 0; maxValue = maxMs / 1000; wrapSelectorWheel = false }
+                        val seconds = NumberPicker(ctx).apply {
+                            minValue = 0
+                            maxValue = maxMs / 1000
+                            wrapSelectorWheel = false
+                            applyNumberPickerTextColor(this, pickerTextColor)
+                        }
                         val millis = NumberPicker(ctx).apply {
                             minValue = 0
                             maxValue = 99
                             displayedValues = Array(100) { (it * 10).toString().padStart(3, '0') }
                             wrapSelectorWheel = true
+                            applyNumberPickerTextColor(this, pickerTextColor)
                         }
                         seconds.value = initialMs.coerceIn(0, maxMs) / 1000
                         millis.value = (initialMs.coerceIn(0, maxMs) % 1000) / 10
@@ -419,8 +503,8 @@ private fun MillisecondPickerDialog(
                         LinearLayout(ctx).apply {
                             orientation = LinearLayout.HORIZONTAL
                             gravity = android.view.Gravity.CENTER
-                            addView(seconds)
-                            addView(millis)
+                            addView(seconds, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                            addView(millis, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
                         }
                     },
                     modifier = Modifier.fillMaxWidth()
@@ -433,11 +517,22 @@ private fun MillisecondPickerDialog(
     )
 }
 
+@Composable
+private fun PickerHeader(label: String, modifier: Modifier = Modifier) {
+    Text(
+        label,
+        style = MaterialTheme.typography.labelMedium,
+        textAlign = TextAlign.Center,
+        modifier = modifier.padding(bottom = 4.dp)
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LicenseScreen(back: () -> Unit) {
     val context = LocalContext.current
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text("ライセンス情報") },
@@ -445,7 +540,14 @@ private fun LicenseScreen(back: () -> Unit) {
             )
         }
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp)) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .consumeWindowInsets(padding)
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp)
+        ) {
             Text("IntentPlayer", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Text("MIT License\nCopyright © 2026 matchadaisuke", modifier = Modifier.padding(vertical = 8.dp))
             TextButton({ openUrl(context, LICENSE_URL) }) { Text("MIT License全文をGitHubで表示") }

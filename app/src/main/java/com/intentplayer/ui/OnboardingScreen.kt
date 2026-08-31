@@ -1,8 +1,14 @@
 package com.intentplayer.ui
 
 import android.Manifest
+import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.os.Environment
+import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -63,6 +69,11 @@ fun OnboardingScreen(
                 ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
         }
     }
+    val allFilesGranted by remember(checkKey) {
+        derivedStateOf {
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
+        }
+    }
     val batteryExcluded by remember(checkKey) {
         derivedStateOf { BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context) }
     }
@@ -81,7 +92,7 @@ fun OnboardingScreen(
         Text("IntentPlayer のセットアップ", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(8.dp))
         Text(
-            if (step < 5) "ステップ ${step + 1} / 5" else "セットアップ完了",
+            if (step < 6) "ステップ ${step + 1} / 6" else "セットアップ完了",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -130,20 +141,37 @@ fun OnboardingScreen(
             )
 
             3 -> SetupStep(
-                title = "4. 音楽フォルダ",
-                description = folderUri?.let { "選択済み: ${it.lastPathSegment ?: it}" }
-                    ?: "再生する音楽フォルダを選択してください。",
+                title = "4. すべてのファイルへのアクセス",
+                description = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                    "このAndroidバージョンでは追加設定は不要です。"
+                } else {
+                    "ファイルマネージャー形式で内部ストレージやSDカードを直接閲覧するために使用します。Androidの設定画面は、このボタンを押した場合だけ開きます。"
+                },
+                ok = allFilesGranted,
+                actionLabel = if (allFilesGranted) "次へ" else "設定画面を開く",
+                onAction = {
+                    if (allFilesGranted) step++ else openAllFilesSetupSettings(context)
+                }
+            )
+
+            4 -> SetupStep(
+                title = "5. 既定のフォルダ",
+                description = folderUri?.let { "選択済み: ${it.lastPathSegment ?: it}\nインテントでfolderUriを省略した場合にもこのフォルダを使用します。" }
+                    ?: "再生する音楽フォルダを選択します。選んだフォルダは、インテントでfolderUriを省略した場合の既定のフォルダとしても保存します。",
                 ok = folderUri != null,
                 actionLabel = if (folderUri != null) "次へ" else "フォルダを選択",
                 onAction = {
-                    if (folderUri != null) step++ else onSelectFolderClick()
+                    if (folderUri != null) {
+                        saveDefaultFolder(context, folderUri)
+                        step++
+                    } else onSelectFolderClick()
                 },
                 secondaryLabel = if (folderUri != null) "フォルダを変更" else null,
                 onSecondary = onSelectFolderClick
             )
 
-            4 -> SetupStep(
-                title = "5. バッテリー最適化",
+            5 -> SetupStep(
+                title = "6. バッテリー最適化",
                 description = "バックグラウンドでIntent待機・再生を安定させるため、最適化対象から除外してください。",
                 ok = batteryExcluded,
                 actionLabel = if (batteryExcluded) "次へ" else "設定を開く",
@@ -209,5 +237,30 @@ private fun SetupStep(
                 }
             }
         }
+    }
+}
+
+private fun saveDefaultFolder(context: Context, uri: Uri?) {
+    if (uri == null) return
+    context.getSharedPreferences("intent_player_prefs", Context.MODE_PRIVATE)
+        .edit()
+        .putString("default_folder_uri", uri.toString())
+        .apply()
+}
+
+private fun openAllFilesSetupSettings(context: Context) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+    try {
+        context.startActivity(
+            Intent(
+                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                Uri.parse("package:${context.packageName}")
+            )
+        )
+    } catch (_: Exception) {
+        runCatching { context.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)) }
+            .onFailure {
+                Toast.makeText(context, "すべてのファイルへのアクセス設定を開けませんでした", Toast.LENGTH_LONG).show()
+            }
     }
 }

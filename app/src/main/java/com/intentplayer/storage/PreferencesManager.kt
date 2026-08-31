@@ -246,6 +246,7 @@ object PreferencesManager {
             put(KEY_PREF_ENABLE_APP_VOLUME, isEnableAppVolume(context))
             put(KEY_PREF_APP_PLAYBACK_VOLUME, getAppPlaybackVolume(context).toDouble())
             put(KEY_PREF_PLAYBACK_SPEED, getPlaybackSpeed(context).toDouble())
+            put(AppThemePreferences.KEY_THEME_MODE, AppThemePreferences.get(context).storedValue)
             prefs.getString(KEY_DEFAULT_FOLDER_URI, null)?.let { put(KEY_DEFAULT_FOLDER_URI, it) }
         }.toString(2)
     }
@@ -290,6 +291,12 @@ object PreferencesManager {
             require(speed.isFinite()) { "再生速度の値が不正です" }
             updates[KEY_PREF_PLAYBACK_SPEED] = normalizePlaybackSpeed(speed.toFloat())
         }
+        if (json.has(AppThemePreferences.KEY_THEME_MODE)) {
+            val rawTheme = json.getString(AppThemePreferences.KEY_THEME_MODE)
+            val theme = AppThemeMode.fromStored(rawTheme)
+            require(theme.storedValue == rawTheme) { "テーマ設定の値が不正です" }
+            updates[AppThemePreferences.KEY_THEME_MODE] = theme.storedValue
+        }
         if (json.has(KEY_DEFAULT_FOLDER_URI)) {
             val raw = json.getString(KEY_DEFAULT_FOLDER_URI)
             val uri = runCatching { Uri.parse(raw) }.getOrNull()
@@ -314,5 +321,6 @@ object PreferencesManager {
                 }
             }
         }
+        AppThemePreferences.initialize(context)
     }
 }

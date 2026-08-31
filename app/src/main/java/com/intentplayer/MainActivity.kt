@@ -9,15 +9,14 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Environment
 import android.os.SystemClock
-import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -27,6 +26,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import com.intentplayer.service.PlaybackService
+import com.intentplayer.storage.AppThemeMode
+import com.intentplayer.storage.AppThemePreferences
 import com.intentplayer.storage.BatteryOptimizationHelper
 import com.intentplayer.storage.PreferencesManager
 import com.intentplayer.ui.MainScreen
@@ -69,6 +70,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handleLaunchIntent(intent)
+        AppThemePreferences.initialize(this)
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -85,12 +87,17 @@ class MainActivity : ComponentActivity() {
         if (!PreferencesManager.isFirstLaunch(this)) {
             requestNotificationPermission()
             requestRuntimePermissions()
-            requestAllFilesAccess()
             checkBatteryOptimization()
         }
 
         setContent {
-            IntentPlayerTheme {
+            val themeMode = AppThemePreferences.mode
+            val darkTheme = when (themeMode) {
+                AppThemeMode.SYSTEM -> isSystemInDarkTheme()
+                AppThemeMode.LIGHT -> false
+                AppThemeMode.DARK -> true
+            }
+            IntentPlayerTheme(darkTheme = darkTheme) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     MainScreen(
                         viewModel = viewModel,
@@ -159,19 +166,6 @@ class MainActivity : ComponentActivity() {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
         if (missing.isNotEmpty()) requestPermissions(missing.toTypedArray(), REQUEST_CODE_RUNTIME_PERMISSIONS)
-    }
-
-    private fun requestAllFilesAccess() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()) return
-        try {
-            startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName")))
-        } catch (_: Exception) {
-            try {
-                startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-            } catch (_: Exception) {
-                Toast.makeText(this, "すべてのファイルへのアクセス設定を開けませんでした。SAFを利用できます。", Toast.LENGTH_LONG).show()
-            }
-        }
     }
 
     private fun checkBatteryOptimization() {

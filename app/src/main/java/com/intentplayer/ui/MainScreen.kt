@@ -11,12 +11,15 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -72,7 +75,8 @@ fun MainScreen(
         Box(
             Modifier
                 .fillMaxSize()
-                .padding(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding())
+                .padding(padding)
+                .consumeWindowInsets(padding)
         ) {
             when (tab) {
                 MainTab.PLAYER -> PlayerTab(viewModel, onBatteryOptimizationClick)
@@ -148,16 +152,6 @@ private fun PlayerTab(viewModel: MainViewModel, onBatteryOptimizationClick: () -
             Spacer(Modifier.height(18.dp))
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Surface(
-                        Modifier.size(190.dp),
-                        shape = MaterialTheme.shapes.extraLarge,
-                        color = MaterialTheme.colorScheme.secondaryContainer
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.GraphicEq, contentDescription = null, modifier = Modifier.size(88.dp))
-                        }
-                    }
-                    Spacer(Modifier.height(24.dp))
                     Text(
                         track?.name ?: "再生するファイルがありません",
                         style = MaterialTheme.typography.titleLarge,
@@ -234,7 +228,9 @@ private fun PlayerTab(viewModel: MainViewModel, onBatteryOptimizationClick: () -
 @Composable
 private fun VolumePickerDialog(initialPercent: Int, onDismiss: () -> Unit, onConfirm: (Int) -> Unit) {
     var selected by remember(initialPercent) { mutableIntStateOf(initialPercent.coerceIn(0, 500)) }
+    val pickerTextColor = MaterialTheme.colorScheme.onSurface.toArgb()
     AlertDialog(
+        modifier = Modifier.widthIn(max = 360.dp),
         onDismissRequest = onDismiss,
         title = { Text("音量を詳しく設定") },
         text = {
@@ -247,8 +243,10 @@ private fun VolumePickerDialog(initialPercent: Int, onDismiss: () -> Unit, onCon
                             value = selected
                             wrapSelectorWheel = false
                             setOnValueChangedListener { _, _, new -> selected = new }
+                            applyNumberPickerTextColor(this, pickerTextColor)
                         }
-                    }
+                    },
+                    update = { applyNumberPickerTextColor(it, pickerTextColor) }
                 )
                 Text("${selected}%", style = MaterialTheme.typography.titleMedium)
                 if (selected > 100) {
@@ -302,6 +300,7 @@ private fun SeekSection(
 @Composable
 private fun SpeedSelector(speed: Float, setSpeed: (Float) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
+    val menuScroll = rememberScrollState()
     val options = remember {
         generateSequence(PreferencesManager.MIN_PLAYBACK_SPEED) { previous ->
             (previous + PreferencesManager.PLAYBACK_SPEED_STEP)
@@ -312,12 +311,18 @@ private fun SpeedSelector(speed: Float, setSpeed: (Float) -> Unit) {
         Text("再生速度")
         Box {
             OutlinedButton({ expanded = true }) { Text("${speedText(speed)}×") }
-            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                options.forEach { s ->
-                    DropdownMenuItem(
-                        text = { Text("${speedText(s)}×") },
-                        onClick = { setSpeed(s); expanded = false }
-                    )
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+                modifier = Modifier.width(136.dp)
+            ) {
+                Column(Modifier.heightIn(max = 360.dp).verticalScroll(menuScroll)) {
+                    options.forEach { s ->
+                        DropdownMenuItem(
+                            text = { Text("${speedText(s)}×") },
+                            onClick = { setSpeed(s); expanded = false }
+                        )
+                    }
                 }
             }
         }
@@ -364,7 +369,6 @@ private fun QueueTab(viewModel: MainViewModel) {
 @Composable
 private fun FolderTab(viewModel: MainViewModel, openSaf: () -> Unit, openQueue: () -> Unit) {
     val context = LocalContext.current
-    val currentQueueFolder by viewModel.folderUri.collectAsState()
     val roots = remember { StorageBrowser.roots(context) }
     var root by remember { mutableStateOf<StorageBrowser.Root?>(null) }
     var directory by remember { mutableStateOf<File?>(null) }
@@ -512,15 +516,13 @@ private fun FolderTab(viewModel: MainViewModel, openSaf: () -> Unit, openQueue: 
 
             Surface(tonalElevation = 3.dp) {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
-                    if (currentQueueFolder != null) {
-                        Text(
-                            "現在: ${folderName(currentQueueFolder)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
+                    Text(
+                        "選択対象: ${directory?.absolutePath.orEmpty()}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                     Button(
                         onClick = {
                             val selected = directory ?: return@Button
