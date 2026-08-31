@@ -28,14 +28,17 @@ fun MainScreen(viewModel: MainViewModel, onSelectFolderClick: () -> Unit, onBatt
     }
     val folderUri by viewModel.folderUri.collectAsState()
     var tab by remember(screen) { mutableStateOf(if (screen == MainViewModel.AppScreen.SETTINGS) MainTab.SETTINGS else if (folderUri == null) MainTab.FOLDERS else MainTab.PLAYER) }
-    Scaffold(bottomBar = {
-        NavigationBar {
-            NavItem(MainTab.PLAYER, tab, Icons.Default.PlayCircle, "再生") { tab = it }
-            NavItem(MainTab.QUEUE, tab, Icons.Default.QueueMusic, "キュー") { tab = it }
-            NavItem(MainTab.FOLDERS, tab, Icons.Default.Folder, "フォルダ") { tab = it }
-            NavItem(MainTab.SETTINGS, tab, Icons.Default.Settings, "設定") { tab = it }
+    Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        bottomBar = {
+            NavigationBar(windowInsets = WindowInsets(0, 0, 0, 0)) {
+                NavItem(MainTab.PLAYER, tab, Icons.Default.PlayCircle, "再生") { tab = it }
+                NavItem(MainTab.QUEUE, tab, Icons.Default.QueueMusic, "キュー") { tab = it }
+                NavItem(MainTab.FOLDERS, tab, Icons.Default.Folder, "フォルダ") { tab = it }
+                NavItem(MainTab.SETTINGS, tab, Icons.Default.Settings, "設定") { tab = it }
+            }
         }
-    }) { padding ->
+    ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             when (tab) {
                 MainTab.PLAYER -> PlayerTab(viewModel, onBatteryOptimizationClick)
