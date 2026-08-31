@@ -28,10 +28,12 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaNotification
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import com.google.common.collect.ImmutableList
 import com.intentplayer.MainActivity
 import com.intentplayer.R
 import com.intentplayer.model.Track
@@ -70,6 +72,11 @@ class PlaybackService : MediaSessionService() {
     private var loudnessEnhancer: android.media.audiofx.LoudnessEnhancer? = null
     private val audioManager by lazy { getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     private var audioFocusRequest: android.media.AudioFocusRequest? = null
+
+    private var defaultNotificationProvider: DefaultMediaNotificationProvider? = null
+    private var lastNotificationLayout: ImmutableList<CommandButton>? = null
+    private var lastNotificationActionFactory: MediaNotification.ActionFactory? = null
+    private var notificationChangedCallback: MediaNotification.Provider.Callback? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -305,22 +312,27 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun setupNotificationProvider() {
-        val defaultProvider = DefaultMediaNotificationProvider.Builder(this)
+        val delegate = DefaultMediaNotificationProvider.Builder(this)
             .setChannelId(NOTIFICATION_CHANNEL_ID)
             .setChannelName(R.string.notification_channel_name)
             .build()
-        defaultProvider.setSmallIcon(R.drawable.ic_notification)
+        delegate.setSmallIcon(R.drawable.ic_notification)
+        defaultNotificationProvider = delegate
+
         setMediaNotificationProvider(object : MediaNotification.Provider {
             override fun createNotification(
                 mediaSession: MediaSession,
-                customLayout: com.google.common.collect.ImmutableList<androidx.media3.session.CommandButton>,
+                customLayout: ImmutableList<CommandButton>,
                 actionFactory: MediaNotification.ActionFactory,
                 onNotificationChangedCallback: MediaNotification.Provider.Callback
             ): MediaNotification {
+                lastNotificationLayout = customLayout
+                lastNotificationActionFactory = actionFactory
+                notificationChangedCallback = onNotificationChangedCallback
                 return if (PreferencesManager.isUseCustomMediaPlayback(this@PlaybackService)) {
                     MediaNotification(FOREGROUND_NOTIFICATION_ID, buildSilentPlaybackNotification())
                 } else {
-                    defaultProvider.createNotification(mediaSession, customLayout, actionFactory, onNotificationChangedCallback)
+                    delegate.createNotification(mediaSession, customLayout, actionFactory, onNotificationChangedCallback)
                 }
             }
 
@@ -328,15 +340,31 @@ class PlaybackService : MediaSessionService() {
                 session: MediaSession,
                 action: String,
                 extras: android.os.Bundle
-            ): Boolean = defaultProvider.handleCustomCommand(session, action, extras)
+            ): Boolean = delegate.handleCustomCommand(session, action, extras)
         })
     }
 
     private fun refreshMediaPresentation() {
-        try {
-            triggerNotificationUpdate()
-        } catch (e: Exception) {
-            Log.w(TAG, "Media3 notification refresh failed: ${e.message}")
+        val session = mediaSession
+        val callback = notificationChangedCallback
+        if (session != null && callback != null) {
+            val refreshed = if (PreferencesManager.isUseCustomMediaPlayback(this)) {
+                MediaNotification(FOREGROUND_NOTIFICATION_ID, buildSilentPlaybackNotification())
+            } else {
+                val delegate = defaultNotificationProvider
+                val layout = lastNotificationLayout
+                val actionFactory = lastNotificationActionFactory
+                if (delegate != null && layout != null && actionFactory != null) {
+                    delegate.createNotification(session, layout, actionFactory, callback)
+                } else null
+            }
+            if (refreshed != null) {
+                try {
+                    callback.onNotificationChanged(refreshed)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Media3 notification callback refresh failed: ${e.message}")
+                }
+            }
         }
         if (PreferencesManager.isUseCustomMediaPlayback(this)) updateSilentNotification()
     }
@@ -359,7 +387,6 @@ class PlaybackService : MediaSessionService() {
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-
         fun buildActionIntent(command: String): PendingIntent = PendingIntent.getBroadcast(
             this,
             command.hashCode(),
@@ -369,7 +396,6 @@ class PlaybackService : MediaSessionService() {
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-
         val builder = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("$indexText $title".trim())
