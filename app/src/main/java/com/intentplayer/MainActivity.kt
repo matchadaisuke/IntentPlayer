@@ -50,13 +50,21 @@ class MainActivity : ComponentActivity() {
 
     private val folderPickerLauncher = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
         if (uri == null) return@registerForActivityResult
-        try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: SecurityException) {}
+        try {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (_: SecurityException) {
+            Toast.makeText(this, "フォルダの永続アクセス権を保存できませんでした", Toast.LENGTH_LONG).show()
+        }
         viewModel.onFolderSelected(uri)
     }
+
     private val batteryOptimizationLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         viewModel.onBatteryOptimizationResult(!BatteryOptimizationHelper.isIgnoringBatteryOptimizations(this))
     }
-    private val notificationPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> viewModel.onNotificationPermissionResult(!granted) }
+
+    private val notificationPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        viewModel.onNotificationPermissionResult(!granted)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -75,8 +83,12 @@ class MainActivity : ComponentActivity() {
         })
 
         if (!PreferencesManager.isFirstLaunch(this)) {
-            requestNotificationPermission(); requestStoragePermission(); requestAllFilesAccess(); checkBatteryOptimization()
+            requestNotificationPermission()
+            requestRuntimePermissions()
+            requestAllFilesAccess()
+            checkBatteryOptimization()
         }
+
         setContent {
             IntentPlayerTheme {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -113,31 +125,69 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleLaunchIntent(intent: Intent?) {
-        if (intent != null && intent.action != Intent.ACTION_MAIN) {
+        if (intent?.getBooleanExtra(EXTRA_OPEN_PLAYER_TAB, false) == true) {
             playerTabRequest++
+            intent.removeExtra(EXTRA_OPEN_PLAYER_TAB)
         }
     }
 
     private fun requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val permission = Manifest.permission.POST_NOTIFICATIONS
-            if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) notificationPermissionLauncher.launch(permission) else viewModel.onNotificationPermissionResult(false)
-        } else viewModel.onNotificationPermissionResult(false)
+            if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
+                notificationPermissionLauncher.launch(permission)
+            } else {
+                viewModel.onNotificationPermissionResult(false)
+            }
+        } else {
+            viewModel.onNotificationPermissionResult(false)
+        }
     }
-    private fun requestStoragePermission() {
-        val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE
-        if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(permission), REQUEST_CODE_STORAGE)
+
+    private fun requestRuntimePermissions() {
+        val permissions = mutableListOf<String>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions += Manifest.permission.READ_MEDIA_AUDIO
+        } else {
+            permissions += Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            permissions += Manifest.permission.BLUETOOTH_CONNECT
+        }
+        val missing = permissions.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isNotEmpty()) requestPermissions(missing.toTypedArray(), REQUEST_CODE_RUNTIME_PERMISSIONS)
     }
+
     private fun requestAllFilesAccess() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()) return
-        try { startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName"))) } catch (_: Exception) { startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)) }
+        try {
+            startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName")))
+        } catch (_: Exception) {
+            try {
+                startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+            } catch (_: Exception) {
+                Toast.makeText(this, "すべてのファイルへのアクセス設定を開けませんでした。SAFを利用できます。", Toast.LENGTH_LONG).show()
+            }
+        }
     }
-    private fun checkBatteryOptimization() { viewModel.onBatteryOptimizationResult(!BatteryOptimizationHelper.isIgnoringBatteryOptimizations(this)) }
+
+    private fun checkBatteryOptimization() {
+        viewModel.onBatteryOptimizationResult(!BatteryOptimizationHelper.isIgnoringBatteryOptimizations(this))
+    }
+
     private fun openBatteryOptimizationSettings() {
-        try { batteryOptimizationLauncher.launch(BatteryOptimizationHelper.createBatteryOptimizationIntent(this)) } catch (_: Exception) { startActivity(BatteryOptimizationHelper.createBatterySettingsIntent()) }
+        try {
+            batteryOptimizationLauncher.launch(BatteryOptimizationHelper.createBatteryOptimizationIntent(this))
+        } catch (_: Exception) {
+            startActivity(BatteryOptimizationHelper.createBatterySettingsIntent())
+        }
     }
+
     companion object {
-        private const val REQUEST_CODE_STORAGE = 1001
+        const val EXTRA_OPEN_PLAYER_TAB = "com.intentplayer.extra.OPEN_PLAYER_TAB"
+        private const val REQUEST_CODE_RUNTIME_PERMISSIONS = 1001
         private const val EXIT_BACK_INTERVAL_MS = 2_000L
     }
 }
