@@ -64,8 +64,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val appPlaybackVolume = MutableStateFlow(1.0f)
     val appVersion = MutableStateFlow("Unknown")
 
-
-
     val errorLogs = MutableStateFlow<List<String>>(emptyList())
 
     val folderUri = MutableStateFlow<Uri?>(null)
@@ -100,9 +98,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         enableAppVolume.value = PreferencesManager.isEnableAppVolume(context)
         appPlaybackVolume.value = PreferencesManager.getAppPlaybackVolume(context)
         reloadErrorLogs()
-
-
-
 
         // アプリバージョンの取得
         try {
@@ -180,8 +175,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setAutoResumeTimeoutMs(timeoutMs: Long) {
-        PreferencesManager.setAutoResumeTimeoutMs(context, timeoutMs)
-        autoResumeTimeoutMs.value = timeoutMs
+        val safeTimeout = timeoutMs.coerceIn(
+            PreferencesManager.MIN_AUTO_RESUME_TIMEOUT_MS,
+            PreferencesManager.MAX_AUTO_RESUME_TIMEOUT_MS
+        )
+        PreferencesManager.setAutoResumeTimeoutMs(context, safeTimeout)
+        autoResumeTimeoutMs.value = safeTimeout
     }
 
     fun setUseCustomMediaPlayback(enabled: Boolean) {
@@ -192,25 +191,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setEnableAppVolume(enabled: Boolean) {
         PreferencesManager.setEnableAppVolume(context, enabled)
         enableAppVolume.value = enabled
+        sendAppVolumeToService(if (enabled) appPlaybackVolume.value else 1.0f)
     }
 
     fun setAppPlaybackVolume(volume: Float) {
-        // NaN や Infinite は coerceIn を素通りするため先にガード
-        val safeVolume = if (volume.isFinite()) volume.coerceIn(0.0f, 1.0f) else 1.0f
+        val safeVolume = if (volume.isFinite()) {
+            volume.coerceIn(0.0f, PreferencesManager.MAX_APP_PLAYBACK_VOLUME)
+        } else {
+            1.0f
+        }
         PreferencesManager.setAppPlaybackVolume(context, safeVolume)
         appPlaybackVolume.value = safeVolume
+        sendAppVolumeToService(safeVolume)
+    }
+
+    private fun sendAppVolumeToService(volume: Float) {
+        val intent = Intent(context, PlaybackService::class.java).apply {
+            putExtra(ControlReceiver.EXTRA_COMMAND, "app_volume")
+            putExtra("volume", volume)
+        }
         try {
-            controller?.volume = safeVolume
-        } catch (e: IllegalArgumentException) {
-            // 万が一 safeVolume が範囲外になっても最大値で安全にフォールバック
-            controller?.volume = 1.0f
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to apply app volume to service: ${e.message}")
         }
     }
 
     fun reloadErrorLogs() {
-
-
-
         errorLogs.value = PreferencesManager.getErrorLogs(context)
     }
 
