@@ -15,7 +15,6 @@ enum class AppThemeMode(val storedValue: String) {
     }
 }
 
-/** App theme preference shared by MainActivity and SettingsScreen. */
 object AppThemePreferences {
     private const val PREFS_NAME = "intent_player_prefs"
     const val KEY_THEME_MODE = "pref_theme_mode"
