@@ -84,7 +84,7 @@ class PlaybackService : MediaSessionService() {
         startForeground(FOREGROUND_NOTIFICATION_ID, buildIdleNotification())
         initExoPlayer()
         // 独自再生方式では MediaSession 自体を作らない。
-        // Wear OS / AVRCP / System UI に再生中の曲情報を公開しないため。
+        // Wear OS / AVRCP / System UI に再生中の曲情報や再生状態を公開しないため。
         if (!PreferencesManager.isUseCustomMediaPlayback(this)) {
             initMediaSession()
             setupNotificationProvider()
@@ -102,7 +102,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
-        // custom mode では mediaSession が null なので、system / Wear OS / Bluetooth を含め
+        // custom mode では mediaSession が null のため、system / Wear OS / Bluetooth を含め
         // どの controller にも再生セッションを公開しない。
         return mediaSession
     }
@@ -195,6 +195,7 @@ class PlaybackService : MediaSessionService() {
             lastNotificationLayout = null
             lastNotificationActionFactory = null
             notificationChangedCallback = null
+            // フォアグラウンド通知はMediaSessionとは別物なので、そのまま曲情報付きで維持する。
             updateSilentNotification()
         } else if (mediaSession == null) {
             initMediaSession()
@@ -398,6 +399,11 @@ class PlaybackService : MediaSessionService() {
 
     private fun buildSilentPlaybackNotification(): Notification {
         val player = exoPlayer
+        val metadata = player?.currentMediaItem?.mediaMetadata
+        val title = metadata?.title?.toString().orEmpty().ifBlank { "Unknown" }
+        val idx = player?.currentMediaItemIndex ?: 0
+        val total = playlist.size
+        val indexText = if (total > 0) "[${idx + 1}/$total]" else ""
         val isPlaying = player?.isPlaying == true
         val statusText = if (isPlaying) "再生中" else "一時停止中"
         val tapIntent = PendingIntent.getActivity(
@@ -417,9 +423,9 @@ class PlaybackService : MediaSessionService() {
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(getString(R.string.app_name))
+            .setContentTitle("$indexText $title".trim())
             .setContentText(statusText)
             .setContentIntent(tapIntent)
             .addAction(0, "前へ", buildActionIntent(ControlReceiver.CMD_PREVIOUS))
@@ -429,8 +435,8 @@ class PlaybackService : MediaSessionService() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .setSilent(true)
-            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
-            .build()
+        loadArtworkBitmap(metadata?.artworkUri)?.let(builder::setLargeIcon)
+        return builder.build()
     }
 
     private fun loadArtworkBitmap(uri: Uri?): Bitmap? {
@@ -802,21 +808,30 @@ class PlaybackService : MediaSessionService() {
 
     private fun applyVolume(volume: Float) {
         val player = exoPlayer ?: return
-        val clamped = if (volume.isFinite()) volume.coerceIn(0.0f, PreferencesManager.MAX_APP_PLAYBACK_VOLUME) else 1.0f
+        val clamped = if (volume.isFinite()) {
+            volume.coerceIn(0.0f, PreferencesManager.MAX_APP_PLAYBACK_VOLUME)
+        } else 1.0f
+
+        // ExoPlayerには常に0〜1だけを渡し、100%超の増幅はLoudnessEnhancer側へ分離する。
         try {
             player.volume = clamped.coerceAtMost(1.0f)
         } catch (e: Exception) {
             Log.e(TAG, "Base volume failed", e)
             try { player.volume = 1.0f } catch (_: Exception) {}
         }
+
         val enhancer = loudnessEnhancer ?: return
         try {
+            // 5.0x = 約 +13.98 dB。mBへ変換し、要求上限(+14dB)を超えないよう制限する。
             val gainMb = if (clamped > 1.0f) {
-                (20.0 * log10(clamped.toDouble()) * 100.0).toInt().coerceIn(0, MAX_LOUDNESS_GAIN_MB)
+                (20.0 * log10(clamped.toDouble()) * 100.0)
+                    .toInt()
+                    .coerceIn(0, MAX_LOUDNESS_GAIN_MB)
             } else 0
             enhancer.setTargetGain(gainMb)
             if (!enhancer.enabled) enhancer.enabled = true
         } catch (e: Exception) {
+            // 端末固有のAudioEffect制限に当たってもクラッシュさせず、増幅なしへ戻す。
             Log.w(TAG, "Loudness gain failed: ${e.message}")
             try { enhancer.setTargetGain(0) } catch (_: Exception) {}
         }
@@ -824,7 +839,6 @@ class PlaybackService : MediaSessionService() {
 
     private fun buildMediaMetadata(track: Track): MediaMetadata = MediaMetadata.Builder()
         .setTitle(track.name)
-        .setArtist(track.artist ?: "Unknown Artist")
         .setAlbumTitle(track.album ?: "Unknown Album")
         .setArtworkUri(track.artworkUri)
         .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
@@ -883,6 +897,6 @@ class PlaybackService : MediaSessionService() {
         private const val STATE_BROADCAST_INTERVAL_MS = 500L
         private const val MUTE_MONITOR_INTERVAL_MS = 500L
         private const val MAX_CONSECUTIVE_ERRORS = 3
-        private const val MAX_LOUDNESS_GAIN_MB = 600
+        private const val MAX_LOUDNESS_GAIN_MB = 1_400
     }
 }
