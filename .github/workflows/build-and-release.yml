@@ -8,12 +8,12 @@ on:
       version_name:
         description: 'Version Name (空欄 = version.json から自動取得)'
         required: false
-        default: 'v5.4'
+        default: 'v5.5'
         type: string
       version_code:
         description: 'Version Code (空欄 = version.json から自動取得して+1)'
         required: false
-        default: '505'
+        default: '506'
         type: string
 
 jobs:
