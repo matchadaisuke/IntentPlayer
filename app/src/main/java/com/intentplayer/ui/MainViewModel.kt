@@ -9,6 +9,7 @@ import android.content.IntentFilter
 import android.net.Uri
 import android.os.Build
 import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
@@ -108,11 +109,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         val stateFilter = IntentFilter(PlaybackService.ACTION_PLAYBACK_STATE)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.registerReceiver(playbackStateReceiver, stateFilter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            context.registerReceiver(playbackStateReceiver, stateFilter)
-        }
+        ContextCompat.registerReceiver(
+            context,
+            playbackStateReceiver,
+            stateFilter,
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
 
         if (!useCustomMediaPlayback.value) initMediaController()
         startPositionPolling()
