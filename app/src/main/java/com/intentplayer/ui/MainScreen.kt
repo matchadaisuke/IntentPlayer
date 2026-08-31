@@ -1,390 +1,144 @@
 package com.intentplayer.ui
 
 import android.net.Uri
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.DragInteraction
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.intentplayer.model.Track
 import com.intentplayer.storage.PreferencesManager
 
+private enum class MainTab { PLAYER, QUEUE, FOLDERS, SETTINGS }
+
 @Composable
-fun MainScreen(
-    viewModel: MainViewModel,
-    onSelectFolderClick: () -> Unit,
-    onBatteryOptimizationClick: () -> Unit
-) {
-    val currentScreen by viewModel.currentScreen.collectAsState()
-    when (currentScreen) {
-        MainViewModel.AppScreen.ONBOARDING -> OnboardingScreen(
-            viewModel = viewModel,
-            onSelectFolderClick = onSelectFolderClick,
-            onBatteryOptimizationClick = onBatteryOptimizationClick
-        )
-        MainViewModel.AppScreen.SETTINGS -> {
-            BackHandler { viewModel.navigateTo(MainViewModel.AppScreen.MAIN) }
-            SettingsScreen(viewModel)
+fun MainScreen(viewModel: MainViewModel, onSelectFolderClick: () -> Unit, onBatteryOptimizationClick: () -> Unit) {
+    val screen by viewModel.currentScreen.collectAsState()
+    if (screen == MainViewModel.AppScreen.ONBOARDING) {
+        OnboardingScreen(viewModel, onSelectFolderClick, onBatteryOptimizationClick)
+        return
+    }
+    val folderUri by viewModel.folderUri.collectAsState()
+    var tab by remember(screen) { mutableStateOf(if (screen == MainViewModel.AppScreen.SETTINGS) MainTab.SETTINGS else if (folderUri == null) MainTab.FOLDERS else MainTab.PLAYER) }
+    Scaffold(bottomBar = {
+        NavigationBar {
+            NavItem(MainTab.PLAYER, tab, Icons.Default.PlayCircle, "再生") { tab = it }
+            NavItem(MainTab.QUEUE, tab, Icons.Default.QueueMusic, "キュー") { tab = it }
+            NavItem(MainTab.FOLDERS, tab, Icons.Default.Folder, "フォルダ") { tab = it }
+            NavItem(MainTab.SETTINGS, tab, Icons.Default.Settings, "設定") { tab = it }
         }
-        MainViewModel.AppScreen.MAIN -> MainScreenContent(
-            viewModel,
-            onSelectFolderClick,
-            onBatteryOptimizationClick
-        )
+    }) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding)) {
+            when (tab) {
+                MainTab.PLAYER -> PlayerTab(viewModel, onBatteryOptimizationClick)
+                MainTab.QUEUE -> QueueTab(viewModel)
+                MainTab.FOLDERS -> FolderTab(viewModel, onSelectFolderClick) { tab = MainTab.QUEUE }
+                MainTab.SETTINGS -> SettingsScreen(viewModel)
+            }
+        }
     }
 }
 
 @Composable
-fun MainScreenContent(
-    viewModel: MainViewModel,
-    onSelectFolderClick: () -> Unit,
-    onBatteryOptimizationClick: () -> Unit
-) {
-    val folderUri by viewModel.folderUri.collectAsState()
-    val tracks by viewModel.tracks.collectAsState()
+private fun RowScope.NavItem(tab: MainTab, selected: MainTab, icon: ImageVector, label: String, select: (MainTab) -> Unit) {
+    NavigationBarItem(selected == tab, { select(tab) }, { Icon(icon, label) }, label = { Text(label) })
+}
+
+@Composable
+private fun PlayerTab(viewModel: MainViewModel, onBatteryOptimizationClick: () -> Unit) {
     val isPlaying by viewModel.isPlaying.collectAsState()
-    val currentTrack by viewModel.currentTrack.collectAsState()
-    val uiMessage by viewModel.uiMessage.collectAsState()
-    val isScanning by viewModel.isScanning.collectAsState()
-    val currentPositionMs by viewModel.currentPositionMs.collectAsState()
-    val durationMs by viewModel.durationMs.collectAsState()
-    val playbackSpeed by viewModel.playbackSpeed.collectAsState()
-    val enableAppVolume by viewModel.enableAppVolume.collectAsState()
-    val appPlaybackVolume by viewModel.appPlaybackVolume.collectAsState()
-    val isBatteryOptimized by viewModel.isBatteryOptimized.collectAsState()
-    val isNotificationPermissionDenied by viewModel.isNotificationPermissionDenied.collectAsState()
-
-    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .systemBarsPadding()
-                .padding(16.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Audiotrack, null, modifier = Modifier.size(32.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("IntentPlayer", style = MaterialTheme.typography.headlineMedium)
-                }
-                IconButton(onClick = { viewModel.navigateTo(MainViewModel.AppScreen.SETTINGS) }) {
-                    Icon(Icons.Default.Settings, contentDescription = "設定")
-                }
-            }
-
-            Spacer(Modifier.height(16.dp))
-            if (isNotificationPermissionDenied) {
-                NotificationPermissionBanner()
-                Spacer(Modifier.height(8.dp))
-            }
-            if (isBatteryOptimized) {
-                BatteryOptimizationBanner(onBatteryOptimizationClick)
-                Spacer(Modifier.height(8.dp))
-            }
-
-            FolderSection(folderUri, onSelectFolderClick)
-            Spacer(Modifier.height(16.dp))
-
-            NowPlayingSection(
-                currentTrack = currentTrack,
-                isPlaying = isPlaying,
-                currentPositionMs = currentPositionMs,
-                durationMs = durationMs,
-                playbackSpeed = playbackSpeed,
-                enableAppVolume = enableAppVolume,
-                appPlaybackVolume = appPlaybackVolume,
-                onVolumeChange = viewModel::setAppPlaybackVolume,
-                onPauseResumeClick = { if (isPlaying) viewModel.pause() else viewModel.resume() },
-                onStopClick = viewModel::stop,
-                onNextClick = viewModel::next,
-                onPreviousClick = viewModel::previous,
-                onSeekTo = viewModel::seekTo,
-                onSpeedSelected = viewModel::setPlaybackSpeed
-            )
-
-            Spacer(Modifier.height(16.dp))
-            uiMessage?.let { message ->
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(message, modifier = Modifier.weight(1f))
-                        IconButton(onClick = viewModel::clearUiMessage) {
-                            Icon(Icons.Default.Close, contentDescription = "閉じる")
-                        }
+    val track by viewModel.currentTrack.collectAsState()
+    val position by viewModel.currentPositionMs.collectAsState()
+    val duration by viewModel.durationMs.collectAsState()
+    val speed by viewModel.playbackSpeed.collectAsState()
+    val volumeEnabled by viewModel.enableAppVolume.collectAsState()
+    val volume by viewModel.appPlaybackVolume.collectAsState()
+    val batteryOptimized by viewModel.isBatteryOptimized.collectAsState()
+    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp), contentPadding = PaddingValues(vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        item {
+            Text("再生", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth())
+            if (batteryOptimized) Card(Modifier.fillMaxWidth().padding(top = 12.dp)) { Column(Modifier.padding(14.dp)) { Text("バッテリー最適化が有効です"); TextButton(onClick = onBatteryOptimizationClick) { Text("設定を開く") } } }
+            Spacer(Modifier.height(18.dp))
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Surface(Modifier.size(190.dp), shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.secondaryContainer) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.GraphicEq, null, modifier = Modifier.size(88.dp)) } }
+                    Spacer(Modifier.height(24.dp))
+                    Text(track?.name ?: "再生するファイルがありません", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.height(18.dp))
+                    SeekSection(position, duration, speed, track != null, viewModel::seekTo)
+                    Spacer(Modifier.height(16.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(viewModel::previous, enabled = track != null, modifier = Modifier.size(56.dp)) { Icon(Icons.Default.SkipPrevious, "前へ", modifier = Modifier.size(34.dp)) }
+                        FilledIconButton({ if (isPlaying) viewModel.pause() else viewModel.resume() }, enabled = track != null, modifier = Modifier.size(76.dp)) { Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, if (isPlaying) "一時停止" else "再生", modifier = Modifier.size(46.dp)) }
+                        IconButton(viewModel::next, enabled = track != null, modifier = Modifier.size(56.dp)) { Icon(Icons.Default.SkipNext, "次へ", modifier = Modifier.size(34.dp)) }
+                        FilledTonalIconButton(viewModel::stop, enabled = track != null, modifier = Modifier.size(48.dp)) { Icon(Icons.Default.Stop, "停止") }
+                    }
+                    Spacer(Modifier.height(20.dp))
+                    SpeedSelector(speed, viewModel::setPlaybackSpeed)
+                    if (volumeEnabled) {
+                        Spacer(Modifier.height(16.dp))
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("音量"); Text("${(volume * 100).toInt()}%") }
+                        Slider(volume.coerceIn(0f, PreferencesManager.MAX_APP_PLAYBACK_VOLUME), viewModel::setAppPlaybackVolume, valueRange = 0f..PreferencesManager.MAX_APP_PLAYBACK_VOLUME, steps = 39, enabled = track != null)
                     }
                 }
-                Spacer(Modifier.height(8.dp))
-            }
-
-            TrackListSection(tracks, currentTrack, isScanning, viewModel::playTrack)
-        }
-    }
-}
-
-@Composable
-private fun NotificationPermissionBanner() {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Notifications, null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("通知権限が拒否されています", style = MaterialTheme.typography.labelMedium)
-            }
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "通知権限がないとロック画面・Bluetoothデバイスへの再生情報表示ができません。設定から許可してください。",
-                style = MaterialTheme.typography.bodySmall
-            )
-        }
-    }
-}
-
-@Composable
-private fun BatteryOptimizationBanner(onClickOptimize: () -> Unit) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Warning, null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("バッテリー最適化が有効です", style = MaterialTheme.typography.labelMedium)
-            }
-            Spacer(Modifier.height(4.dp))
-            Text("バックグラウンド再生が停止する場合があります。", style = MaterialTheme.typography.bodySmall)
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton(onClickOptimize) { Text("バッテリー最適化を無効にする") }
-        }
-    }
-}
-
-@Composable
-private fun FolderSection(folderUri: Uri?, onSelectFolderClick: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-    ) {
-        Column(Modifier.padding(12.dp)) {
-            Text("フォルダ", style = MaterialTheme.typography.labelMedium)
-            Spacer(Modifier.height(4.dp))
-            if (folderUri != null) {
-                Text(
-                    folderUri.lastPathSegment ?: folderUri.toString(),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedButton(onSelectFolderClick) { Text("フォルダを変更") }
-            } else {
-                Text("フォルダが選択されていません")
-                Spacer(Modifier.height(8.dp))
-                Button(onSelectFolderClick) { Text("フォルダを選択") }
             }
         }
     }
 }
 
 @Composable
-private fun NowPlayingSection(
-    currentTrack: Track?,
-    isPlaying: Boolean,
-    currentPositionMs: Long,
-    durationMs: Long,
-    playbackSpeed: Float,
-    enableAppVolume: Boolean,
-    appPlaybackVolume: Float,
-    onVolumeChange: (Float) -> Unit,
-    onPauseResumeClick: () -> Unit,
-    onStopClick: () -> Unit,
-    onNextClick: () -> Unit,
-    onPreviousClick: () -> Unit,
-    onSeekTo: (Long) -> Unit,
-    onSpeedSelected: (Float) -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = if (currentTrack != null) MaterialTheme.colorScheme.primaryContainer
-            else MaterialTheme.colorScheme.surfaceVariant
-        )
-    ) {
-        Column(Modifier.padding(12.dp)) {
-            Text("再生中", style = MaterialTheme.typography.labelMedium)
-            Spacer(Modifier.height(4.dp))
-            Text(currentTrack?.name ?: "（なし）", maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.height(12.dp))
-
-            SeekBarSection(
-                currentPositionMs = currentPositionMs,
-                durationMs = durationMs,
-                playbackSpeed = playbackSpeed,
-                enabled = currentTrack != null && durationMs > 0,
-                onSeekTo = onSeekTo
-            )
-            Spacer(Modifier.height(8.dp))
-
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                OutlinedButton(onPreviousClick, enabled = currentTrack != null) {
-                    Icon(Icons.Default.SkipPrevious, contentDescription = "前へ")
-                }
-                Button(
-                    onClick = onPauseResumeClick,
-                    enabled = currentTrack != null,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(
-                        if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = if (isPlaying) "一時停止" else "再生"
-                    )
-                }
-                OutlinedButton(onNextClick, enabled = currentTrack != null) {
-                    Icon(Icons.Default.SkipNext, contentDescription = "次へ")
-                }
-                OutlinedButton(onStopClick, enabled = currentTrack != null) {
-                    Icon(Icons.Default.Stop, contentDescription = "停止")
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-            SpeedSelector(playbackSpeed, onSpeedSelected)
-            if (enableAppVolume) {
-                Spacer(Modifier.height(12.dp))
-                VolumeSliderSection(appPlaybackVolume, currentTrack != null, onVolumeChange)
-            }
-        }
-    }
+private fun SeekSection(position: Long, duration: Long, speed: Float, enabled: Boolean, seek: (Long) -> Unit) {
+    var dragging by remember { mutableStateOf(false) }
+    var value by remember { mutableStateOf(0f) }
+    val actual = if (dragging) value else if (duration > 0) position.toFloat() / duration else 0f
+    val shown = if (duration > 0) (actual.coerceIn(0f, 1f) * duration).toLong() else 0L
+    val remaining = ((duration - shown).coerceAtLeast(0L) / (speed.takeIf { it > 0f } ?: 1f)).toLong()
+    Slider(actual.coerceIn(0f, 1f), { dragging = true; value = it }, onValueChangeFinished = { dragging = false; if (duration > 0) seek((value * duration).toLong()) }, enabled = enabled)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(clock(shown)); Text(clock(duration)) }
+    Text("残り ${clock(remaining)}", modifier = Modifier.fillMaxWidth())
 }
 
 @Composable
-private fun VolumeSliderSection(volume: Float, enabled: Boolean, onVolumeChange: (Float) -> Unit) {
-    Column {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("音量", style = MaterialTheme.typography.bodySmall)
-            Text("${(volume * 100).toInt()}%", style = MaterialTheme.typography.bodySmall)
-        }
-        Slider(
-            value = volume.coerceIn(0f, PreferencesManager.MAX_APP_PLAYBACK_VOLUME),
-            onValueChange = onVolumeChange,
-            valueRange = 0f..PreferencesManager.MAX_APP_PLAYBACK_VOLUME,
-            steps = 39,
-            enabled = enabled,
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
-}
-
-@Composable
-private fun SeekBarSection(
-    currentPositionMs: Long,
-    durationMs: Long,
-    playbackSpeed: Float,
-    enabled: Boolean,
-    onSeekTo: (Long) -> Unit
-) {
-    var isDragging by remember { mutableStateOf(false) }
-    var dragValue by remember { mutableStateOf(0f) }
-    val interactionSource = remember { MutableInteractionSource() }
-
-    LaunchedEffect(interactionSource) {
-        interactionSource.interactions.collect { interaction ->
-            if (interaction is DragInteraction.Cancel || interaction is DragInteraction.Stop) {
-                isDragging = false
-            }
-        }
-    }
-    LaunchedEffect(enabled) {
-        if (!enabled) {
-            isDragging = false
-            dragValue = 0f
-        }
-    }
-
-    val sliderValue = if (isDragging) dragValue
-    else if (durationMs > 0) currentPositionMs.toFloat() / durationMs.toFloat() else 0f
-    val shownPositionMs = if (isDragging && durationMs > 0) (dragValue * durationMs).toLong() else currentPositionMs
-    val safeSpeed = playbackSpeed.takeIf { it > 0f } ?: 1f
-    val remainingMs = if (durationMs > 0) {
-        ((durationMs - shownPositionMs).coerceAtLeast(0L) / safeSpeed).toLong()
-    } else 0L
-
-    Column {
-        Slider(
-            value = sliderValue.coerceIn(0f, 1f),
-            onValueChange = {
-                isDragging = true
-                dragValue = it
-            },
-            onValueChangeFinished = {
-                isDragging = false
-                if (durationMs > 0) onSeekTo((dragValue * durationMs).toLong())
-            },
-            enabled = enabled,
-            interactionSource = interactionSource,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(formatTime(shownPositionMs), style = MaterialTheme.typography.bodySmall)
-            Text(formatTime(durationMs), style = MaterialTheme.typography.bodySmall)
-        }
-        Text(
-            text = "残り: ${formatClockTime(remainingMs)}",
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.align(Alignment.End)
-        )
-    }
-}
-
-@Composable
-private fun SpeedSelector(currentSpeed: Float, onSpeedSelected: (Float) -> Unit) {
-    val options = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f)
+private fun SpeedSelector(speed: Float, setSpeed: (Float) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("再生速度:", style = MaterialTheme.typography.bodySmall)
-        Spacer(Modifier.width(8.dp))
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+        Text("再生速度")
         Box {
-            OutlinedButton(onClick = { expanded = true }) { Text("${formatSpeed(currentSpeed)}x") }
-            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                options.forEach { speed ->
-                    DropdownMenuItem(
-                        text = { Text("${formatSpeed(speed)}x") },
-                        onClick = {
-                            onSpeedSelected(speed)
-                            expanded = false
-                        }
-                    )
+            OutlinedButton({ expanded = true }) { Text("${speedText(speed)}×") }
+            DropdownMenu(expanded, { expanded = false }) { listOf(.5f, .75f, 1f, 1.25f, 1.5f, 1.75f, 2f).forEach { s -> DropdownMenuItem({ Text("${speedText(s)}×") }, { setSpeed(s); expanded = false }) } }
+        }
+    }
+}
+
+@Composable
+private fun QueueTab(viewModel: MainViewModel) {
+    val tracks by viewModel.tracks.collectAsState()
+    val current by viewModel.currentTrack.collectAsState()
+    val folder by viewModel.folderUri.collectAsState()
+    Column(Modifier.fillMaxSize().padding(20.dp)) {
+        Text("キュー", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        Text("${tracks.size}件・${clock(tracks.sumOf { it.durationMs.coerceAtLeast(0L) })}", style = MaterialTheme.typography.titleMedium)
+        Text(folderName(folder), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(16.dp))
+        if (tracks.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("キューは空です") }
+        else LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            itemsIndexed(tracks) { index, track ->
+                val playing = track.uri == current?.uri
+                Card(Modifier.fillMaxWidth().clickable { viewModel.playTrack(index) }, colors = if (playing) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer) else CardDefaults.cardColors()) {
+                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(if (playing) Icons.Default.GraphicEq else Icons.Default.AudioFile, null)
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) { Text(track.name, maxLines = 2, overflow = TextOverflow.Ellipsis); Text(clock(track.durationMs), style = MaterialTheme.typography.bodySmall) }
+                        Icon(Icons.Default.PlayArrow, "このファイルから再生")
+                    }
                 }
             }
         }
@@ -392,88 +146,24 @@ private fun SpeedSelector(currentSpeed: Float, onSpeedSelected: (Float) -> Unit)
 }
 
 @Composable
-private fun TrackListSection(
-    tracks: List<Track>,
-    currentTrack: Track?,
-    isScanning: Boolean,
-    onTrackClick: (Int) -> Unit
-) {
-    val totalDurationMs = tracks.sumOf { it.durationMs.coerceAtLeast(0L) }
-    Column(Modifier.fillMaxWidth()) {
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                "再生ファイル一覧",
-                style = MaterialTheme.typography.titleSmall,
-                maxLines = 1,
-                modifier = Modifier.weight(1f)
-            )
-            if (tracks.isNotEmpty()) {
-                Text(
-                    "${tracks.size}・合計 ${formatClockTime(totalDurationMs)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1
-                )
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        when {
-            isScanning -> Box(
-                Modifier.fillMaxWidth().height(120.dp),
-                contentAlignment = Alignment.Center
-            ) { CircularProgressIndicator() }
-            tracks.isEmpty() -> Box(
-                Modifier.fillMaxWidth().height(80.dp),
-                contentAlignment = Alignment.Center
-            ) { Text("フォルダを選択してください") }
-            else -> LazyColumn {
-                itemsIndexed(tracks) { index, track ->
-                    TrackItem(track, track.uri == currentTrack?.uri) { onTrackClick(index) }
-                    if (index < tracks.lastIndex) HorizontalDivider()
-                }
-            }
-        }
+private fun FolderTab(viewModel: MainViewModel, selectFolder: () -> Unit, openQueue: () -> Unit) {
+    val folder by viewModel.folderUri.collectAsState()
+    val tracks by viewModel.tracks.collectAsState()
+    Column(Modifier.fillMaxSize().padding(20.dp)) {
+        Text("フォルダ", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(20.dp))
+        Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(20.dp)) {
+            Icon(Icons.Default.FolderOpen, null, modifier = Modifier.size(44.dp)); Spacer(Modifier.height(12.dp))
+            Text("現在のフォルダ", style = MaterialTheme.typography.labelLarge); Text(folderName(folder), style = MaterialTheme.typography.titleMedium)
+            Text("${tracks.size}件・${clock(tracks.sumOf { it.durationMs.coerceAtLeast(0L) })}"); Spacer(Modifier.height(16.dp))
+            Button(selectFolder, Modifier.fillMaxWidth()) { Icon(Icons.Default.CreateNewFolder, null); Spacer(Modifier.width(8.dp)); Text(if (folder == null) "フォルダを選択" else "別のフォルダを選択") }
+            if (tracks.isNotEmpty()) OutlinedButton(openQueue, Modifier.fillMaxWidth()) { Text("キューを見る") }
+        } }
+        Spacer(Modifier.height(16.dp))
+        Text("インテントでフォルダが指定された場合はそのフォルダを再生し、指定がない場合は設定した既定のフォルダを使用します。")
     }
 }
 
-@Composable
-private fun TrackItem(track: Track, isPlaying: Boolean, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 4.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
-            if (isPlaying) Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(16.dp))
-        }
-        Spacer(Modifier.width(8.dp))
-        Column(Modifier.weight(1f)) {
-            Text(track.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(track.fileName, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-    }
-}
-
-private fun formatTime(ms: Long): String {
-    if (ms <= 0L) return "0:00"
-    val totalSeconds = ms / 1000
-    return "${totalSeconds / 60}:${(totalSeconds % 60).toString().padStart(2, '0')}"
-}
-
-private fun formatClockTime(ms: Long): String {
-    val totalSeconds = ((ms.coerceAtLeast(0L) + 999L) / 1000L)
-    val hours = totalSeconds / 3600L
-    val minutes = (totalSeconds % 3600L) / 60L
-    val seconds = totalSeconds % 60L
-    return if (hours > 0L) {
-        "$hours:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
-    } else {
-        "${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
-    }
-}
-
-private fun formatSpeed(speed: Float): String =
-    if (speed == speed.toLong().toFloat()) speed.toLong().toString()
-    else speed.toString().trimEnd('0').trimEnd('.')
+private fun folderName(uri: Uri?): String = uri?.lastPathSegment?.replace("primary:", "/") ?: "フォルダが選択されていません"
+private fun clock(ms: Long): String { val s = (ms.coerceAtLeast(0L) + 999) / 1000; val h = s / 3600; val m = s % 3600 / 60; val sec = s % 60; return if (h > 0) "$h:${m.toString().padStart(2,'0')}:${sec.toString().padStart(2,'0')}" else "${m.toString().padStart(2,'0')}:${sec.toString().padStart(2,'0')}" }
+private fun speedText(speed: Float): String = if (speed == speed.toLong().toFloat()) speed.toLong().toString() else speed.toString().trimEnd('0').trimEnd('.')
