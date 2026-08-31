@@ -25,9 +25,12 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.intentplayer.storage.AppThemeMode
+import com.intentplayer.storage.AppThemePreferences
 import com.intentplayer.storage.PreferencesManager
 import kotlin.math.roundToInt
 
@@ -145,6 +148,12 @@ fun SettingsScreen(viewModel: MainViewModel) {
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp)
         ) {
+            Category(Icons.Default.Palette, "表示")
+            ThemeSelector(
+                selected = AppThemePreferences.mode,
+                onSelect = { AppThemePreferences.set(context, it) }
+            )
+
             Category(Icons.Default.PlayCircle, "再生")
             SwitchRow(
                 "独自の再生システムを有効にする",
@@ -275,6 +284,40 @@ fun SettingsScreen(viewModel: MainViewModel) {
 }
 
 @Composable
+private fun ThemeSelector(selected: AppThemeMode, onSelect: (AppThemeMode) -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
+        Text("テーマ", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "システムは端末のライト/ダーク設定に合わせます。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(10.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ThemeChip("システム", AppThemeMode.SYSTEM, selected, onSelect, Modifier.weight(1f))
+            ThemeChip("ライト", AppThemeMode.LIGHT, selected, onSelect, Modifier.weight(1f))
+            ThemeChip("ダーク", AppThemeMode.DARK, selected, onSelect, Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun ThemeChip(
+    label: String,
+    mode: AppThemeMode,
+    selected: AppThemeMode,
+    onSelect: (AppThemeMode) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    FilterChip(
+        selected = selected == mode,
+        onClick = { onSelect(mode) },
+        label = { Text(label, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center) },
+        modifier = modifier
+    )
+}
+
+@Composable
 private fun Category(icon: ImageVector, title: String) {
     Row(
         Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 8.dp),
@@ -356,7 +399,11 @@ private fun DurationPickerDialog(
         title = { Text(title) },
         text = {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("時　　分　　秒", style = MaterialTheme.typography.labelMedium)
+                Row(Modifier.fillMaxWidth()) {
+                    PickerHeader("時", Modifier.weight(1f))
+                    PickerHeader("分", Modifier.weight(1f))
+                    PickerHeader("秒", Modifier.weight(1f))
+                }
                 AndroidView(
                     factory = { ctx ->
                         val hour = NumberPicker(ctx).apply {
@@ -395,9 +442,9 @@ private fun DurationPickerDialog(
                         LinearLayout(ctx).apply {
                             orientation = LinearLayout.HORIZONTAL
                             gravity = android.view.Gravity.CENTER
-                            addView(hour)
-                            addView(minute)
-                            addView(second)
+                            addView(hour, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                            addView(minute, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                            addView(second, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
                         }
                     },
                     modifier = Modifier.fillMaxWidth()
@@ -426,7 +473,10 @@ private fun MillisecondPickerDialog(
         title = { Text(title) },
         text = {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("秒　　 ミリ秒", style = MaterialTheme.typography.labelMedium)
+                Row(Modifier.fillMaxWidth()) {
+                    PickerHeader("秒", Modifier.weight(1f))
+                    PickerHeader("ミリ秒", Modifier.weight(1f))
+                }
                 AndroidView(
                     factory = { ctx ->
                         val seconds = NumberPicker(ctx).apply {
@@ -453,8 +503,8 @@ private fun MillisecondPickerDialog(
                         LinearLayout(ctx).apply {
                             orientation = LinearLayout.HORIZONTAL
                             gravity = android.view.Gravity.CENTER
-                            addView(seconds)
-                            addView(millis)
+                            addView(seconds, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                            addView(millis, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
                         }
                     },
                     modifier = Modifier.fillMaxWidth()
@@ -464,6 +514,16 @@ private fun MillisecondPickerDialog(
         },
         confirmButton = { TextButton(onClick = { onConfirm(selected.coerceIn(0, maxMs)) }) { Text("設定") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("キャンセル") } }
+    )
+}
+
+@Composable
+private fun PickerHeader(label: String, modifier: Modifier = Modifier) {
+    Text(
+        label,
+        style = MaterialTheme.typography.labelMedium,
+        textAlign = TextAlign.Center,
+        modifier = modifier.padding(bottom = 4.dp)
     )
 }
 
