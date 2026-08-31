@@ -106,11 +106,12 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         val filter = IntentFilter(PlaybackService.ACTION_ERROR)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(playbackErrorReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(playbackErrorReceiver, filter)
-        }
+        ContextCompat.registerReceiver(
+            this,
+            playbackErrorReceiver,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
     }
 
     override fun onStop() {
