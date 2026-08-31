@@ -5,6 +5,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
+import android.widget.NumberPicker
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -20,14 +22,21 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import com.intentplayer.storage.PreferencesManager
 import com.intentplayer.storage.StorageBrowser
 import java.io.File
+import kotlin.math.roundToInt
 
 private enum class MainTab { PLAYER, QUEUE, FOLDERS, SETTINGS }
 
 @Composable
-fun MainScreen(viewModel: MainViewModel, onSelectFolderClick: () -> Unit, onBatteryOptimizationClick: () -> Unit) {
+fun MainScreen(
+    viewModel: MainViewModel,
+    onSelectFolderClick: () -> Unit,
+    onBatteryOptimizationClick: () -> Unit,
+    playerTabRequest: Int = 0
+) {
     val screen by viewModel.currentScreen.collectAsState()
     if (screen == MainViewModel.AppScreen.ONBOARDING) {
         OnboardingScreen(viewModel, onSelectFolderClick, onBatteryOptimizationClick)
@@ -35,12 +44,18 @@ fun MainScreen(viewModel: MainViewModel, onSelectFolderClick: () -> Unit, onBatt
     }
 
     val folderUri by viewModel.folderUri.collectAsState()
+    val currentTrack by viewModel.currentTrack.collectAsState()
     var tab by remember(screen) {
         mutableStateOf(
             if (screen == MainViewModel.AppScreen.SETTINGS) MainTab.SETTINGS
             else if (folderUri == null) MainTab.FOLDERS
+            else if (currentTrack == null) MainTab.QUEUE
             else MainTab.PLAYER
         )
+    }
+
+    LaunchedEffect(playerTabRequest) {
+        if (playerTabRequest > 0) tab = MainTab.PLAYER
     }
 
     Scaffold(
@@ -94,6 +109,18 @@ private fun PlayerTab(viewModel: MainViewModel, onBatteryOptimizationClick: () -
     val volumeEnabled by viewModel.enableAppVolume.collectAsState()
     val volume by viewModel.appPlaybackVolume.collectAsState()
     val batteryOptimized by viewModel.isBatteryOptimized.collectAsState()
+    var volumeDialog by remember { mutableStateOf(false) }
+
+    if (volumeDialog) {
+        VolumePickerDialog(
+            initialPercent = (volume * 100f).roundToInt(),
+            onDismiss = { volumeDialog = false },
+            onConfirm = {
+                viewModel.setAppPlaybackVolume(it / 100f)
+                volumeDialog = false
+            }
+        )
+    }
 
     val selectedTrack = track
     val currentIndex = tracks.indexOfFirst { candidate ->
@@ -135,8 +162,9 @@ private fun PlayerTab(viewModel: MainViewModel, onBatteryOptimizationClick: () -
                         track?.name ?: "再生するファイルがありません",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.SemiBold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(Modifier.height(18.dp))
                     SeekSection(
@@ -178,9 +206,16 @@ private fun PlayerTab(viewModel: MainViewModel, onBatteryOptimizationClick: () -
                     SpeedSelector(speed, viewModel::setPlaybackSpeed)
                     if (volumeEnabled) {
                         Spacer(Modifier.height(16.dp))
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("音量")
-                            Text("${(volume * 100).toInt()}%")
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text("音量", modifier = Modifier.weight(1f))
+                            TextButton(
+                                onClick = { volumeDialog = true },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text("${(volume * 100).roundToInt()}%")
+                                Spacer(Modifier.width(2.dp))
+                                Icon(Icons.Default.Edit, "詳しく設定", modifier = Modifier.size(16.dp))
+                            }
                         }
                         Slider(
                             value = volume.coerceIn(0f, PreferencesManager.MAX_APP_PLAYBACK_VOLUME),
@@ -197,6 +232,36 @@ private fun PlayerTab(viewModel: MainViewModel, onBatteryOptimizationClick: () -
 }
 
 @Composable
+private fun VolumePickerDialog(initialPercent: Int, onDismiss: () -> Unit, onConfirm: (Int) -> Unit) {
+    var selected by remember(initialPercent) { mutableIntStateOf(initialPercent.coerceIn(0, 500)) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("音量を詳しく設定") },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                AndroidView(
+                    factory = { context ->
+                        NumberPicker(context).apply {
+                            minValue = 0
+                            maxValue = 500
+                            value = selected
+                            wrapSelectorWheel = false
+                            setOnValueChangedListener { _, _, new -> selected = new }
+                        }
+                    }
+                )
+                Text("${selected}%", style = MaterialTheme.typography.titleMedium)
+                if (selected > 100) {
+                    Text("100%を超えると音を増幅するため、音割れや歪みが発生する場合があります。", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onConfirm(selected) }) { Text("設定") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("キャンセル") } }
+    )
+}
+
+@Composable
 private fun SeekSection(
     position: Long,
     duration: Long,
@@ -209,7 +274,7 @@ private fun SeekSection(
     var value by remember { mutableStateOf(0f) }
     val actual = if (dragging) value else if (duration > 0) position.toFloat() / duration else 0f
     val shown = if (duration > 0) (actual.coerceIn(0f, 1f) * duration).toLong() else 0L
-    val safeSpeed = speed.takeIf { it > 0f } ?: 1f
+    val safeSpeed = PreferencesManager.normalizePlaybackSpeed(speed)
     val currentRemainingMedia = (duration - shown).coerceAtLeast(0L)
     val fileRemaining = (currentRemainingMedia / safeSpeed).toLong()
     val queueRemaining = ((currentRemainingMedia + followingDuration.coerceAtLeast(0L)) / safeSpeed).toLong()
@@ -237,13 +302,22 @@ private fun SeekSection(
 @Composable
 private fun SpeedSelector(speed: Float, setSpeed: (Float) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
+    val options = remember {
+        generateSequence(PreferencesManager.MIN_PLAYBACK_SPEED) { previous ->
+            (previous + PreferencesManager.PLAYBACK_SPEED_STEP)
+                .takeIf { it <= PreferencesManager.MAX_PLAYBACK_SPEED + 0.001f }
+        }.map(PreferencesManager::normalizePlaybackSpeed).distinct().toList()
+    }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
         Text("再生速度")
         Box {
             OutlinedButton({ expanded = true }) { Text("${speedText(speed)}×") }
-            DropdownMenu(expanded, { expanded = false }) {
-                listOf(.5f, .75f, 1f, 1.25f, 1.5f, 1.75f, 2f).forEach { s ->
-                    DropdownMenuItem({ Text("${speedText(s)}×") }, { setSpeed(s); expanded = false })
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                options.forEach { s ->
+                    DropdownMenuItem(
+                        text = { Text("${speedText(s)}×") },
+                        onClick = { setSpeed(s); expanded = false }
+                    )
                 }
             }
         }
@@ -298,22 +372,26 @@ private fun FolderTab(viewModel: MainViewModel, openSaf: () -> Unit, openQueue: 
     val permissionGranted = remember(refreshKey) { allFilesAllowed() }
     val entriesResult = remember(directory, refreshKey) { directory?.let(StorageBrowser::list) }
 
+    fun navigateUp() {
+        val current = directory ?: return
+        val activeRoot = root?.file
+        if (activeRoot != null && sameFile(current, activeRoot)) {
+            directory = null
+            root = null
+        } else {
+            directory = current.parentFile ?: activeRoot
+        }
+    }
+
+    BackHandler(enabled = directory != null) { navigateUp() }
+
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (directory != null) {
-                IconButton(onClick = {
-                    val current = directory ?: return@IconButton
-                    val activeRoot = root?.file
-                    if (activeRoot != null && sameFile(current, activeRoot)) {
-                        directory = null
-                        root = null
-                    } else {
-                        directory = current.parentFile ?: activeRoot
-                    }
-                }) { Icon(Icons.Default.ArrowBack, "戻る") }
+                IconButton(onClick = ::navigateUp) { Icon(Icons.Default.ArrowBack, "戻る") }
             }
             Column(Modifier.weight(1f)) {
                 Text("フォルダ", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
