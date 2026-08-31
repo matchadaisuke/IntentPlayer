@@ -28,9 +28,9 @@ object PreferencesManager {
     private const val KEY_PREF_ENABLE_APP_VOLUME = "pref_enable_app_volume"
     private const val KEY_PREF_APP_PLAYBACK_VOLUME = "pref_app_playback_volume"
 
-    const val MIN_AUTO_RESUME_TIMEOUT_MS = 1_000L
+    const val MIN_AUTO_RESUME_TIMEOUT_MS = 10L * 60L * 1000L
     const val MAX_AUTO_RESUME_TIMEOUT_MS = 24L * 60L * 60L * 1000L
-    const val MAX_APP_PLAYBACK_VOLUME = 2.0f
+    const val MAX_APP_PLAYBACK_VOLUME = 5.0f
 
     fun saveFolderUri(context: Context, folderUri: Uri) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -176,7 +176,7 @@ object PreferencesManager {
 
     fun getAutoResumeTimeoutMs(context: Context): Long =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .getLong(KEY_PREF_AUTO_RESUME_TIMEOUT_MS, 30_000L)
+            .getLong(KEY_PREF_AUTO_RESUME_TIMEOUT_MS, 10L * 60L * 1000L)
             .coerceIn(MIN_AUTO_RESUME_TIMEOUT_MS, MAX_AUTO_RESUME_TIMEOUT_MS)
 
     fun setAutoResumeTimeoutMs(context: Context, timeoutMs: Long) {
