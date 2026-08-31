@@ -50,22 +50,18 @@ fun SettingsScreen(viewModel: MainViewModel) {
         }
     ) { padding ->
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(scrollState)
-                .padding(16.dp)
+            modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(scrollState).padding(16.dp)
         ) {
             SettingSwitchRow(
                 title = "外部機器に再生情報を出さない",
-                description = "オンにすると、イヤホンや時計からの再生操作を受け付けず、再生中の曲情報も外部機器に表示しません。アプリ内とMacroDroidからは操作できます。",
+                description = "オンにすると、イヤホンや時計からの再生操作を受け付けず、再生中のファイル情報も外部機器に表示しません。アプリ内とMacroDroidからは操作できます。",
                 checked = useCustomMediaPlayback,
                 onCheckedChange = viewModel::setUseCustomMediaPlayback
             )
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
             SettingSwitchRow(
-                title = "アプリの音量をさらに大きくする",
+                title = "音量",
                 description = "オンにすると、アプリ内の音量を0〜500%で調整できます。100%を超えると音を増幅するため、音源や端末によっては音が歪むことがあります。",
                 checked = enableAppVolume,
                 onCheckedChange = viewModel::setEnableAppVolume
@@ -88,10 +84,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
                     onCheckedChange = viewModel::setAutoResumeTimeoutEnabled
                 )
                 if (autoResumeTimeoutEnabled) {
-                    AutoResumeTimeoutEditor(
-                        timeoutMs = autoResumeTimeoutMs,
-                        onTimeoutChanged = viewModel::setAutoResumeTimeoutMs
-                    )
+                    AutoResumeTimeoutEditor(timeoutMs = autoResumeTimeoutMs, onTimeoutChanged = viewModel::setAutoResumeTimeoutMs)
                 }
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             }
@@ -121,11 +114,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
             Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text("イヤホン接続後、再生まで少し待つ", style = MaterialTheme.typography.titleMedium)
                         Text(
@@ -164,35 +153,21 @@ fun SettingsScreen(viewModel: MainViewModel) {
                     )
                     Text("■ 再生完了のお知らせ ( com.intentplayer.PLAYBACK_EVENT )", style = MaterialTheme.typography.labelLarge)
                     Text(
-                        "event: track_completed / playlist_completed\ntrackName: 対象の曲名",
+                        "event: track_completed / playlist_completed\ntrackName: 対象のファイル名",
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(bottom = 8.dp)
                     )
                     Text("■ エラーのお知らせ ( com.intentplayer.ERROR )", style = MaterialTheme.typography.labelLarge)
-                    Text(
-                        "reason: エラーの種類\nmessage: エラー内容",
-                        style = MaterialTheme.typography.bodySmall
-                    )
+                    Text("reason: エラーの種類\nmessage: エラー内容", style = MaterialTheme.typography.bodySmall)
                 }
             }
 
-            Box(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "バージョン: $appVersion",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            Box(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                Text(text = "バージョン: $appVersion", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("最近のエラー (20件まで)", style = MaterialTheme.typography.titleMedium)
                 TextButton(onClick = viewModel::clearErrorLogs) { Text("クリア") }
             }
@@ -200,12 +175,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
                 Text("エラーはありません", modifier = Modifier.padding(top = 8.dp))
             } else {
                 errorLogs.forEach { log ->
-                    Text(
-                        text = log,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(vertical = 4.dp)
-                    )
+                    Text(text = log, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 4.dp))
                 }
             }
         }
@@ -213,34 +183,18 @@ fun SettingsScreen(viewModel: MainViewModel) {
 }
 
 @Composable
-private fun SettingSwitchRow(
-    title: String,
-    description: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
+private fun SettingSwitchRow(title: String, description: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
         Column(modifier = Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(
-                description,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 
 @Composable
-private fun AutoResumeTimeoutEditor(
-    timeoutMs: Long,
-    onTimeoutChanged: (Long) -> Unit
-) {
+private fun AutoResumeTimeoutEditor(timeoutMs: Long, onTimeoutChanged: (Long) -> Unit) {
     val minMs = PreferencesManager.MIN_AUTO_RESUME_TIMEOUT_MS
     val maxMs = PreferencesManager.MAX_AUTO_RESUME_TIMEOUT_MS
     val safeMs = timeoutMs.coerceIn(minMs, maxMs)
@@ -250,11 +204,7 @@ private fun AutoResumeTimeoutEditor(
     var showDetailDialog by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Text("自動再開できる時間", style = MaterialTheme.typography.titleMedium)
             Text(formatDuration(safeMs), style = MaterialTheme.typography.titleMedium)
         }
@@ -266,16 +216,13 @@ private fun AutoResumeTimeoutEditor(
         Slider(
             value = totalMinutes.toFloat(),
             onValueChange = { minutes ->
-                val roundedMinutes = ((minutes / 10f).roundToLong() * 10L)
-                    .coerceIn(minMinutes.toLong(), maxMinutes.toLong())
+                val roundedMinutes = ((minutes / 10f).roundToLong() * 10L).coerceIn(minMinutes.toLong(), maxMinutes.toLong())
                 onTimeoutChanged(roundedMinutes * 60_000L)
             },
             valueRange = minMinutes.toFloat()..maxMinutes.toFloat(),
             steps = ((maxMinutes - minMinutes) / 10 - 1).coerceAtLeast(0)
         )
-        TextButton(onClick = { showDetailDialog = true }) {
-            Text("詳しく設定する")
-        }
+        TextButton(onClick = { showDetailDialog = true }) { Text("詳しく設定する") }
     }
 
     if (showDetailDialog) {
@@ -291,11 +238,7 @@ private fun AutoResumeTimeoutEditor(
 }
 
 @Composable
-private fun TimeoutDetailDialog(
-    timeoutMs: Long,
-    onDismiss: () -> Unit,
-    onConfirm: (Long) -> Unit
-) {
+private fun TimeoutDetailDialog(timeoutMs: Long, onDismiss: () -> Unit, onConfirm: (Long) -> Unit) {
     val initialSeconds = (timeoutMs / 1000L).coerceIn(600L, 86_400L)
     var hours by remember { mutableStateOf((initialSeconds / 3600L).toInt()) }
     var minutes by remember { mutableStateOf(((initialSeconds % 3600L) / 60L).toInt()) }
@@ -312,11 +255,7 @@ private fun TimeoutDetailDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(16.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
                     NumberWheel("時間", hours, 0, 24) { hours = it }
                     NumberWheel("分", minutes, 0, 59) { minutes = it }
                     NumberWheel("秒", seconds, 0, 59) { seconds = it }
@@ -325,25 +264,16 @@ private fun TimeoutDetailDialog(
         },
         confirmButton = {
             TextButton(onClick = {
-                val totalSeconds = (hours * 3600L + minutes * 60L + seconds)
-                    .coerceIn(600L, 86_400L)
+                val totalSeconds = (hours * 3600L + minutes * 60L + seconds).coerceIn(600L, 86_400L)
                 onConfirm(totalSeconds * 1000L)
             }) { Text("決定") }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("キャンセル") }
-        }
+        dismissButton = { TextButton(onClick = onDismiss) { Text("キャンセル") } }
     )
 }
 
 @Composable
-private fun NumberWheel(
-    label: String,
-    value: Int,
-    minValue: Int,
-    maxValue: Int,
-    onValueChanged: (Int) -> Unit
-) {
+private fun NumberWheel(label: String, value: Int, minValue: Int, maxValue: Int, onValueChanged: (Int) -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         AndroidView(
             factory = { context ->
