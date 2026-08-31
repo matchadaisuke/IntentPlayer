@@ -95,8 +95,9 @@ private fun PlayerTab(viewModel: MainViewModel, onBatteryOptimizationClick: () -
     val volume by viewModel.appPlaybackVolume.collectAsState()
     val batteryOptimized by viewModel.isBatteryOptimized.collectAsState()
 
+    val selectedTrack = track
     val currentIndex = tracks.indexOfFirst { candidate ->
-        candidate.uri == track?.uri || (track != null && candidate.name == track.name)
+        candidate.uri == selectedTrack?.uri || candidate.name == selectedTrack?.name
     }
     val followingDuration = if (currentIndex >= 0 && currentIndex + 1 < tracks.size) {
         tracks.subList(currentIndex + 1, tracks.size).sumOf { it.durationMs.coerceAtLeast(0L) }
