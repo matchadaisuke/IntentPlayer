@@ -28,7 +28,6 @@ import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Build
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -57,6 +56,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.intentplayer.model.Track
+import com.intentplayer.storage.PreferencesManager
 
 /**
  * MainScreen
@@ -85,12 +85,10 @@ fun MainScreen(
             SettingsScreen(viewModel = viewModel)
         }
         MainViewModel.AppScreen.DIAGNOSIS -> {
-            BackHandler { viewModel.navigateTo(MainViewModel.AppScreen.MAIN) }
-            DiagnosisScreen(
-                viewModel = viewModel,
-                onSelectFolderClick = onSelectFolderClick,
-                onBatteryOptimizationClick = onBatteryOptimizationClick
-            )
+            // 旧自己診断画面はメイン導線から外した。既存状態から遷移した場合はメインへ戻す。
+            LaunchedEffect(Unit) {
+                viewModel.navigateTo(MainViewModel.AppScreen.MAIN)
+            }
         }
         MainViewModel.AppScreen.MAIN -> {
             MainScreenContent(
@@ -121,7 +119,6 @@ fun MainScreenContent(
     val appPlaybackVolume by viewModel.appPlaybackVolume.collectAsState()
 
     val isBatteryOptimized by viewModel.isBatteryOptimized.collectAsState()
-    // 通知権限拒否状態
     val isNotificationPermissionDenied by viewModel.isNotificationPermissionDenied.collectAsState()
 
     Surface(
@@ -152,25 +149,18 @@ fun MainScreenContent(
                         style = MaterialTheme.typography.headlineMedium
                     )
                 }
-                Row {
-                    IconButton(onClick = { viewModel.navigateTo(MainViewModel.AppScreen.DIAGNOSIS) }) {
-                        Icon(Icons.Default.Build, contentDescription = "自己診断")
-                    }
-                    IconButton(onClick = { viewModel.navigateTo(MainViewModel.AppScreen.SETTINGS) }) {
-                        Icon(Icons.Default.Settings, contentDescription = "設定")
-                    }
+                IconButton(onClick = { viewModel.navigateTo(MainViewModel.AppScreen.SETTINGS) }) {
+                    Icon(Icons.Default.Settings, contentDescription = "設定")
                 }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // 通知権限拒否バナー（ロック画面・BT通知が出ない原因として最重要）
             if (isNotificationPermissionDenied) {
                 NotificationPermissionBanner()
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
-            // バッテリー最適化バナー（未設定の場合のみ表示）
             if (isBatteryOptimized) {
                 BatteryOptimizationBanner(
                     onClickOptimize = onBatteryOptimizationClick
@@ -178,7 +168,6 @@ fun MainScreenContent(
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
-            // ----- フォルダ選択 -----
             FolderSection(
                 folderUri = folderUri,
                 onSelectFolderClick = onSelectFolderClick
@@ -186,7 +175,6 @@ fun MainScreenContent(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // ----- 再生コントロール -----
             NowPlayingSection(
                 currentTrack = currentTrack,
                 isPlaying = isPlaying,
@@ -208,7 +196,6 @@ fun MainScreenContent(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // ----- エラーメッセージ（「閉じる」ボタン追加） -----
             uiMessage?.let { message ->
                 Card(
                     colors = CardDefaults.cardColors(
@@ -228,7 +215,6 @@ fun MainScreenContent(
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onErrorContainer
                         )
-                        // 「閉じる」ボタン追加
                         IconButton(
                             onClick = { viewModel.clearUiMessage() }
                         ) {
@@ -243,7 +229,6 @@ fun MainScreenContent(
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
-            // ----- トラックリスト -----
             TrackListSection(
                 tracks = tracks,
                 currentTrack = currentTrack,
@@ -254,21 +239,6 @@ fun MainScreenContent(
     }
 }
 
-// ==========================================
-// 通知権限拒否バナー
-// ==========================================
-
-/**
- * 通知権限が拒否されている場合に表示するバナー。
- *
- * POST_NOTIFICATIONS が拒否されると:
- *   - ロック画面に再生情報が出ない
- *   - Bluetooth デバイスに曲名が送出されない
- *   - 通知欄の再生コントロールが表示されない
- *
- * ユーザーに設定画面への案内を表示する。
- * （システム設定への Intent は Activity が必要なため、ここでは案内のみ）
- */
 @Composable
 private fun NotificationPermissionBanner() {
     Card(
@@ -303,14 +273,6 @@ private fun NotificationPermissionBanner() {
     }
 }
 
-// ==========================================
-// バッテリー最適化バナー
-// ==========================================
-
-/**
- * バッテリー最適化が有効な場合に表示するバナー。
- * バックグラウンド再生中に Service が止まる可能性をユーザーに案内する。
- */
 @Composable
 private fun BatteryOptimizationBanner(
     onClickOptimize: () -> Unit
@@ -352,10 +314,6 @@ private fun BatteryOptimizationBanner(
         }
     }
 }
-
-// ==========================================
-// フォルダセクション
-// ==========================================
 
 @Composable
 private fun FolderSection(
@@ -402,10 +360,6 @@ private fun FolderSection(
         }
     }
 }
-
-// ==========================================
-// 再生コントロールセクション
-// ==========================================
 
 @Composable
 private fun NowPlayingSection(
@@ -541,10 +495,10 @@ private fun VolumeSliderSection(
             )
         }
         Slider(
-            value = volume,
-            onValueChange = { onVolumeChange(it) },
-            valueRange = 0f..1.0f,
-            steps = 19,
+            value = volume.coerceIn(0f, PreferencesManager.MAX_APP_PLAYBACK_VOLUME),
+            onValueChange = onVolumeChange,
+            valueRange = 0f..PreferencesManager.MAX_APP_PLAYBACK_VOLUME,
+            steps = 39,
             enabled = enabled,
             modifier = Modifier.fillMaxWidth()
         )
@@ -562,9 +516,6 @@ private fun SeekBarSection(
     var dragValue by remember { mutableStateOf(0f) }
     val interactionSource = remember { MutableInteractionSource() }
 
-    // タッチキャンセル（通知パネル展開・着信等）で onValueChangeFinished が
-    // 呼ばれない場合でも isDragging をリセットする。
-    // DragInteraction.Cancel を検知することで確実にリセットできる。
     LaunchedEffect(interactionSource) {
         interactionSource.interactions.collect { interaction ->
             if (interaction is DragInteraction.Cancel ||
@@ -575,7 +526,6 @@ private fun SeekBarSection(
         }
     }
 
-    // 曲停止・切り替え時のフォールバックリセット（durationMs=0 になった瞬間）
     LaunchedEffect(enabled) {
         if (!enabled) {
             isDragging = false
@@ -672,10 +622,6 @@ private fun SpeedSelector(
         }
     }
 }
-
-// ==========================================
-// トラックリスト
-// ==========================================
 
 @Composable
 private fun TrackListSection(
@@ -794,10 +740,6 @@ private fun TrackItem(
         }
     }
 }
-
-// ==========================================
-// ユーティリティ関数
-// ==========================================
 
 private fun formatTime(ms: Long): String {
     if (ms <= 0L) return "0:00"
