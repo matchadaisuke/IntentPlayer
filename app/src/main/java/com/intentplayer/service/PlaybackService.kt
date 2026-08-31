@@ -69,6 +69,7 @@ class PlaybackService : MediaSessionService() {
     private var reconnectJob: Job? = null
     private var pausedByMute = false
     private var mutedRouteKey: String? = null
+    private var requestedPlaybackSpeed = 1.0f
     private var loudnessEnhancer: android.media.audiofx.LoudnessEnhancer? = null
     private val audioManager by lazy { getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     private var audioFocusRequest: android.media.AudioFocusRequest? = null
@@ -84,8 +85,6 @@ class PlaybackService : MediaSessionService() {
         ensureNotificationChannel()
         startForeground(FOREGROUND_NOTIFICATION_ID, buildIdleNotification())
         initExoPlayer()
-        // 独自再生方式では MediaSession 自体を作らない。
-        // Wear OS / AVRCP / System UI に再生中の曲情報や再生状態を公開しないため。
         if (!PreferencesManager.isUseCustomMediaPlayback(this)) {
             initMediaSession()
             setupNotificationProvider()
@@ -102,11 +101,7 @@ class PlaybackService : MediaSessionService() {
         return result
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
-        // custom mode では mediaSession が null のため、system / Wear OS / Bluetooth を含め
-        // どの controller にも再生セッションを公開しない。
-        return mediaSession
-    }
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         Log.d(TAG, "onTaskRemoved: keep service alive for intent control")
@@ -147,9 +142,18 @@ class PlaybackService : MediaSessionService() {
                         playFromUriFromStart(this, folderUri)
                     } else {
                         val player = exoPlayer
-                        if (player != null && currentFolderUri == folderUri && index == -1 &&
-                            player.playbackState != Player.STATE_IDLE && player.playbackState != Player.STATE_ENDED
-                        ) {
+                        val reusableQueue = player != null &&
+                            currentFolderUri == folderUri &&
+                            player.mediaItemCount > 0 &&
+                            player.playbackState != Player.STATE_IDLE &&
+                            player.playbackState != Player.STATE_ENDED
+
+                        if (reusableQueue && player != null) {
+                            if (index >= 0) {
+                                val target = index.coerceIn(0, player.mediaItemCount - 1)
+                                player.seekTo(target, 0L)
+                            }
+                            player.setPlaybackSpeed(requestedPlaybackSpeed)
                             player.play()
                         } else {
                             if (index >= 0) playFromUriAt(this, folderUri, index) else playFromUri(this, folderUri)
@@ -165,11 +169,18 @@ class PlaybackService : MediaSessionService() {
                 clearAutomaticPauseReasons()
                 stopPlayback()
             }
-            ControlReceiver.CMD_NEXT -> exoPlayer?.takeIf { it.hasNextMediaItem() }?.seekToNextMediaItem()
+            ControlReceiver.CMD_NEXT -> {
+                val player = exoPlayer ?: return
+                if (player.hasNextMediaItem()) {
+                    player.seekToNextMediaItem()
+                    player.setPlaybackSpeed(requestedPlaybackSpeed)
+                }
+            }
             ControlReceiver.CMD_PREVIOUS -> {
-                val p = exoPlayer ?: return
-                if (p.currentPosition > 3000L) p.seekTo(0L)
-                else if (p.hasPreviousMediaItem()) p.seekToPreviousMediaItem()
+                val player = exoPlayer ?: return
+                if (player.currentPosition > 3000L) player.seekTo(0L)
+                else if (player.hasPreviousMediaItem()) player.seekToPreviousMediaItem()
+                player.setPlaybackSpeed(requestedPlaybackSpeed)
             }
             ControlReceiver.CMD_SEEK -> {
                 val pos = intent.getLongExtra(ControlReceiver.EXTRA_SEEK_TO, -1L)
@@ -179,8 +190,8 @@ class PlaybackService : MediaSessionService() {
                 }
             }
             ControlReceiver.CMD_SPEED -> {
-                val speed = intent.getFloatExtra(ControlReceiver.EXTRA_SPEED, 1.0f)
-                exoPlayer?.setPlaybackSpeed(speed.coerceIn(0.5f, 2.0f))
+                requestedPlaybackSpeed = intent.getFloatExtra(ControlReceiver.EXTRA_SPEED, 1.0f).coerceIn(0.5f, 2.0f)
+                exoPlayer?.setPlaybackSpeed(requestedPlaybackSpeed)
                 refreshMediaPresentation()
             }
             CMD_APP_VOLUME -> applyVolume(intent.getFloatExtra(EXTRA_APP_VOLUME, 1.0f))
@@ -192,8 +203,6 @@ class PlaybackService : MediaSessionService() {
 
     private fun applyCustomMediaPlaybackMode(enabled: Boolean) {
         if (enabled) {
-            // MediaSession が存在するだけで Android framework / AVRCP / Wear OS へ
-            // 再生情報が広告され得るため、custom mode では完全に release する。
             try { mediaSession?.release() } catch (e: Exception) {
                 Log.w(TAG, "Failed to release MediaSession for private mode: ${e.message}")
             }
@@ -202,7 +211,6 @@ class PlaybackService : MediaSessionService() {
             lastNotificationLayout = null
             lastNotificationActionFactory = null
             notificationChangedCallback = null
-            // フォアグラウンド通知はMediaSessionとは別物なので、そのまま曲情報付きで維持する。
             updateSilentNotification()
         } else if (mediaSession == null) {
             initMediaSession()
@@ -242,6 +250,7 @@ class PlaybackService : MediaSessionService() {
                 val idx = player.currentMediaItemIndex
                 PreferencesManager.saveTrackIndex(this@PlaybackService, idx)
                 PreferencesManager.savePlaybackPosition(this@PlaybackService, 0L)
+                player.setPlaybackSpeed(requestedPlaybackSpeed)
                 refreshMediaPresentation()
                 if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
                     playlist.getOrNull(idx - 1)?.let { sendEventBroadcast(EVENT_TRACK_COMPLETED, it.name) }
@@ -262,10 +271,14 @@ class PlaybackService : MediaSessionService() {
                 refreshMediaPresentation()
             }
 
-            override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (isPlaying) requestAudioFocus() else abandonAudioFocus()
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 refreshMediaPresentation()
-                updateNotificationTicker(isPlaying)
+                updateNotificationTicker(playWhenReady)
+            }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (isPlaying) requestAudioFocus()
+                else if (!player.playWhenReady) abandonAudioFocus()
             }
 
             override fun onPositionDiscontinuity(
@@ -416,6 +429,13 @@ class PlaybackService : MediaSessionService() {
         sendPlaybackStateBroadcast()
     }
 
+    private fun isPlaybackRequested(player: Player?): Boolean =
+        player != null &&
+            player.playWhenReady &&
+            player.mediaItemCount > 0 &&
+            player.playbackState != Player.STATE_IDLE &&
+            player.playbackState != Player.STATE_ENDED
+
     private fun buildSilentPlaybackNotification(): Notification {
         val player = exoPlayer
         val metadata = player?.currentMediaItem?.mediaMetadata
@@ -423,7 +443,7 @@ class PlaybackService : MediaSessionService() {
         val idx = player?.currentMediaItemIndex ?: 0
         val total = playlist.size
         val indexText = if (total > 0) "[${idx + 1}/$total]" else ""
-        val isPlaying = player?.isPlaying == true
+        val playbackRequested = isPlaybackRequested(player)
         val remainingText = buildRemainingTimeText()
         val tapIntent = PendingIntent.getActivity(
             this,
@@ -448,7 +468,7 @@ class PlaybackService : MediaSessionService() {
             .setContentText(remainingText)
             .setContentIntent(tapIntent)
             .addAction(0, "前へ", buildActionIntent(ControlReceiver.CMD_PREVIOUS))
-            .addAction(0, if (isPlaying) "一時停止" else "再生", buildActionIntent(if (isPlaying) ControlReceiver.CMD_PAUSE else ControlReceiver.CMD_PLAY))
+            .addAction(0, if (playbackRequested) "一時停止" else "再生", buildActionIntent(if (playbackRequested) ControlReceiver.CMD_PAUSE else ControlReceiver.CMD_PLAY))
             .addAction(0, "次へ", buildActionIntent(ControlReceiver.CMD_NEXT))
             .addAction(0, "停止", buildActionIntent(ControlReceiver.CMD_STOP))
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -458,12 +478,12 @@ class PlaybackService : MediaSessionService() {
         return builder.build()
     }
 
-    private fun updateNotificationTicker(isPlaying: Boolean) {
+    private fun updateNotificationTicker(playbackRequested: Boolean) {
         notificationTickerJob?.cancel()
         notificationTickerJob = null
-        if (!isPlaying) return
+        if (!playbackRequested) return
         notificationTickerJob = serviceScope.launch {
-            while (isActive && exoPlayer?.isPlaying == true) {
+            while (isActive && isPlaybackRequested(exoPlayer)) {
                 delay(NOTIFICATION_REMAINING_UPDATE_INTERVAL_MS)
                 refreshMediaPresentation()
             }
@@ -486,7 +506,7 @@ class PlaybackService : MediaSessionService() {
             0L
         }
 
-        val speed = player.playbackParameters.speed.takeIf { it > 0f } ?: 1f
+        val speed = requestedPlaybackSpeed.takeIf { it > 0f } ?: 1f
         val fileRemainingMs = (currentRemainingMediaMs / speed).toLong().coerceAtLeast(0L)
         val folderRemainingMs = ((currentRemainingMediaMs + followingMediaMs) / speed)
             .toLong()
@@ -680,7 +700,7 @@ class PlaybackService : MediaSessionService() {
         PreferencesManager.isBlockSpeakerMutePlaybackEnabled(this) && isMusicStreamMuted()
 
     private fun handlePlaybackBlocked() {
-        sendErrorBroadcast(this, "blocked_media_mute", "メディア音量が0のため再生を一時停止しました")
+        sendErrorBroadcast(this, "blocked_media_mute", "メディア音量が0のため再生できません。音量を上げてください。")
     }
 
     private fun startMuteMonitorLoop() {
@@ -700,6 +720,7 @@ class PlaybackService : MediaSessionService() {
                     pausedByMute = true
                     mutedRouteKey = currentOutputRouteKey()
                     player.pause()
+                    sendErrorBroadcast(this@PlaybackService, "paused_media_mute", "メディア音量が0になったため再生を一時停止しました。")
                     Log.d(TAG, "Volume zero: paused route=$mutedRouteKey")
                 }
                 if (!muted && pausedByMute && player != null) {
@@ -709,6 +730,7 @@ class PlaybackService : MediaSessionService() {
                     ) {
                         pausedByMute = false
                         mutedRouteKey = null
+                        player.setPlaybackSpeed(requestedPlaybackSpeed)
                         player.play()
                         Log.d(TAG, "Volume restored on same route: resumed route=$currentRoute")
                     }
@@ -750,7 +772,11 @@ class PlaybackService : MediaSessionService() {
             if (shouldBlockPlayback()) {
                 pausedByMute = true
                 mutedRouteKey = currentOutputRouteKey()
-            } else player.play()
+                handlePlaybackBlocked()
+            } else {
+                player.setPlaybackSpeed(requestedPlaybackSpeed)
+                player.play()
+            }
         }
     }
 
@@ -794,10 +820,10 @@ class PlaybackService : MediaSessionService() {
         val index = player.currentMediaItemIndex
         sendBroadcast(Intent(ACTION_PLAYBACK_STATE).setPackage(packageName).apply {
             putExtra(EXTRA_STATE_INDEX, index)
-            putExtra(EXTRA_STATE_IS_PLAYING, player.isPlaying)
+            putExtra(EXTRA_STATE_IS_PLAYING, isPlaybackRequested(player))
             putExtra(EXTRA_STATE_POSITION_MS, player.currentPosition.coerceAtLeast(0L))
-            putExtra(EXTRA_STATE_DURATION_MS, player.duration.takeIf { it > 0 } ?: 0L)
-            putExtra(EXTRA_STATE_SPEED, player.playbackParameters.speed)
+            putExtra(EXTRA_STATE_DURATION_MS, player.duration.takeIf { it > 0 } ?: playlist.getOrNull(index)?.durationMs?.takeIf { it > 0L } ?: 0L)
+            putExtra(EXTRA_STATE_SPEED, requestedPlaybackSpeed)
             putExtra(EXTRA_STATE_HAS_MEDIA, player.mediaItemCount > 0)
         })
     }
@@ -860,6 +886,7 @@ class PlaybackService : MediaSessionService() {
             startIndex,
             startPositionMs
         )
+        player.setPlaybackSpeed(requestedPlaybackSpeed)
         player.prepare()
         if (shouldBlockPlayback()) {
             player.playWhenReady = false
@@ -888,7 +915,6 @@ class PlaybackService : MediaSessionService() {
             volume.coerceIn(0.0f, PreferencesManager.MAX_APP_PLAYBACK_VOLUME)
         } else 1.0f
 
-        // ExoPlayerには常に0〜1だけを渡し、100%超の増幅はLoudnessEnhancer側へ分離する。
         try {
             player.volume = clamped.coerceAtMost(1.0f)
         } catch (e: Exception) {
@@ -898,7 +924,6 @@ class PlaybackService : MediaSessionService() {
 
         val enhancer = loudnessEnhancer ?: return
         try {
-            // 5.0x = 約 +13.98 dB。mBへ変換し、要求上限(+14dB)を超えないよう制限する。
             val gainMb = if (clamped > 1.0f) {
                 (20.0 * log10(clamped.toDouble()) * 100.0)
                     .toInt()
@@ -907,7 +932,6 @@ class PlaybackService : MediaSessionService() {
             enhancer.setTargetGain(gainMb)
             if (!enhancer.enabled) enhancer.enabled = true
         } catch (e: Exception) {
-            // 端末固有のAudioEffect制限に当たってもクラッシュさせず、増幅なしへ戻す。
             Log.w(TAG, "Loudness gain failed: ${e.message}")
             try { enhancer.setTargetGain(0) } catch (_: Exception) {}
         }
