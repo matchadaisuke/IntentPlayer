@@ -15,30 +15,22 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
-// ダークテーマ用カラースキーム
 private val DarkColorScheme = darkColorScheme(
     primary = Purple80,
     secondary = PurpleGrey80,
     tertiary = Pink80
 )
 
-// ライトテーマ用カラースキーム
 private val LightColorScheme = lightColorScheme(
     primary = Purple40,
     secondary = PurpleGrey40,
     tertiary = Pink40
 )
 
-/**
- * IntentPlayer アプリ全体のテーマ
- *
- * Material3 を使用。
- * Android 12以上ではダイナミックカラー対応。
- */
+/** IntentPlayer app theme, including system bar appearance. */
 @Composable
 fun IntentPlayerTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    // Android 12 (API 31) 以上でダイナミックカラーを使用
     dynamicColor: Boolean = true,
     content: @Composable () -> Unit
 ) {
@@ -55,8 +47,16 @@ fun IntentPlayerTheme(
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            window.statusBarColor = colorScheme.primary.toArgb()
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            val controller = WindowCompat.getInsetsController(window, view)
+
+            window.statusBarColor = colorScheme.background.toArgb()
+            window.navigationBarColor = colorScheme.surfaceContainer.toArgb()
+            controller.isAppearanceLightStatusBars = !darkTheme
+            controller.isAppearanceLightNavigationBars = !darkTheme
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                window.isNavigationBarContrastEnforced = false
+            }
         }
     }
 
