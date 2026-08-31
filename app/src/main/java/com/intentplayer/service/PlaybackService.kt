@@ -53,7 +53,6 @@ import kotlin.math.log10
 class PlaybackService : MediaSessionService() {
 
     private val TAG = "PlaybackService"
-
     private var exoPlayer: ExoPlayer? = null
     private var playerWrapper: Player? = null
     private var mediaSession: MediaSession? = null
@@ -63,16 +62,12 @@ class PlaybackService : MediaSessionService() {
     private var currentFolderUri: Uri? = null
     private var scanJob: Job? = null
     private var consecutiveErrors = 0
-
     private var pausedByDisconnect = false
     private var lastDisconnectTimeMs = 0L
     private var reconnectJob: Job? = null
-
     private var pausedByMute = false
     private var mutedRouteKey: String? = null
-
     private var loudnessEnhancer: android.media.audiofx.LoudnessEnhancer? = null
-
     private val audioManager by lazy { getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     private var audioFocusRequest: android.media.AudioFocusRequest? = null
 
@@ -90,15 +85,12 @@ class PlaybackService : MediaSessionService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val result = super.onStartCommand(intent, flags, startId)
-        val command = intent?.getStringExtra(ControlReceiver.EXTRA_COMMAND)
-        if (command != null) handleCommand(intent, command)
+        intent?.getStringExtra(ControlReceiver.EXTRA_COMMAND)?.let { handleCommand(intent, it) }
         return result
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
-        if (PreferencesManager.isUseCustomMediaPlayback(this) &&
-            controllerInfo.packageName != packageName
-        ) {
+        if (PreferencesManager.isUseCustomMediaPlayback(this) && controllerInfo.packageName != packageName) {
             Log.d(TAG, "Blocked external controller ${controllerInfo.packageName}")
             return null
         }
@@ -132,9 +124,7 @@ class PlaybackService : MediaSessionService() {
                 val folderUriStr = intent.getStringExtra(ControlReceiver.EXTRA_FOLDER_URI)
                 val folderUri = if (folderUriStr != null) {
                     try { Uri.parse(folderUriStr) } catch (_: Exception) { null }
-                } else {
-                    PreferencesManager.loadFolderUri(this)
-                }
+                } else PreferencesManager.loadFolderUri(this)
                 val index = intent.getIntExtra("index", -1)
                 if (folderUri != null) {
                     if (shouldBlockPlayback()) {
@@ -146,21 +136,16 @@ class PlaybackService : MediaSessionService() {
                         playFromUriFromStart(this, folderUri)
                     } else {
                         val player = exoPlayer
-                        if (player != null &&
-                            currentFolderUri == folderUri &&
-                            index == -1 &&
-                            player.playbackState != Player.STATE_IDLE &&
-                            player.playbackState != Player.STATE_ENDED
+                        if (player != null && currentFolderUri == folderUri && index == -1 &&
+                            player.playbackState != Player.STATE_IDLE && player.playbackState != Player.STATE_ENDED
                         ) {
                             player.play()
                         } else {
-                            if (index >= 0) playFromUriAt(this, folderUri, index)
-                            else playFromUri(this, folderUri)
+                            if (index >= 0) playFromUriAt(this, folderUri, index) else playFromUri(this, folderUri)
                         }
                     }
                 }
             }
-
             ControlReceiver.CMD_PAUSE -> {
                 clearAutomaticPauseReasons()
                 exoPlayer?.pause()
@@ -169,9 +154,7 @@ class PlaybackService : MediaSessionService() {
                 clearAutomaticPauseReasons()
                 stopPlayback()
             }
-            ControlReceiver.CMD_NEXT ->
-                exoPlayer?.takeIf { it.hasNextMediaItem() }?.seekToNextMediaItem()
-
+            ControlReceiver.CMD_NEXT -> exoPlayer?.takeIf { it.hasNextMediaItem() }?.seekToNextMediaItem()
             ControlReceiver.CMD_PREVIOUS -> {
                 val p = exoPlayer ?: return
                 if (p.currentPosition > 3000L) p.seekTo(0L)
@@ -185,9 +168,7 @@ class PlaybackService : MediaSessionService() {
                 val speed = intent.getFloatExtra(ControlReceiver.EXTRA_SPEED, 1.0f)
                 exoPlayer?.setPlaybackSpeed(speed.coerceIn(0.5f, 2.0f))
             }
-            CMD_APP_VOLUME -> {
-                applyVolume(intent.getFloatExtra(EXTRA_APP_VOLUME, 1.0f))
-            }
+            CMD_APP_VOLUME -> applyVolume(intent.getFloatExtra(EXTRA_APP_VOLUME, 1.0f))
         }
     }
 
@@ -222,11 +203,8 @@ class PlaybackService : MediaSessionService() {
                 PreferencesManager.saveTrackIndex(this@PlaybackService, idx)
                 PreferencesManager.savePlaybackPosition(this@PlaybackService, 0L)
                 refreshMediaPresentation()
-
                 if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
-                    playlist.getOrNull(idx - 1)?.let { prev ->
-                        sendEventBroadcast(EVENT_TRACK_COMPLETED, prev.name)
-                    }
+                    playlist.getOrNull(idx - 1)?.let { sendEventBroadcast(EVENT_TRACK_COMPLETED, it.name) }
                 }
             }
 
@@ -278,12 +256,10 @@ class PlaybackService : MediaSessionService() {
                 clearAutomaticPauseReasons()
                 super.play()
             }
-
             override fun pause() {
                 clearAutomaticPauseReasons()
                 super.pause()
             }
-
             override fun setPlayWhenReady(playWhenReady: Boolean) {
                 if (playWhenReady && shouldBlockPlayback()) {
                     handlePlaybackBlocked()
@@ -292,7 +268,6 @@ class PlaybackService : MediaSessionService() {
                 if (playWhenReady) clearAutomaticPauseReasons()
                 super.setPlayWhenReady(playWhenReady)
             }
-
             override fun stop() {
                 clearAutomaticPauseReasons()
                 super.stop()
@@ -307,9 +282,7 @@ class PlaybackService : MediaSessionService() {
             this,
             0,
             Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                    Intent.FLAG_ACTIVITY_NEW_TASK
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -337,7 +310,6 @@ class PlaybackService : MediaSessionService() {
             .setChannelName(R.string.notification_channel_name)
             .build()
         defaultProvider.setSmallIcon(R.drawable.ic_notification)
-
         setMediaNotificationProvider(object : MediaNotification.Provider {
             override fun createNotification(
                 mediaSession: MediaSession,
@@ -348,12 +320,7 @@ class PlaybackService : MediaSessionService() {
                 return if (PreferencesManager.isUseCustomMediaPlayback(this@PlaybackService)) {
                     MediaNotification(FOREGROUND_NOTIFICATION_ID, buildSilentPlaybackNotification())
                 } else {
-                    defaultProvider.createNotification(
-                        mediaSession,
-                        customLayout,
-                        actionFactory,
-                        onNotificationChangedCallback
-                    )
+                    defaultProvider.createNotification(mediaSession, customLayout, actionFactory, onNotificationChangedCallback)
                 }
             }
 
@@ -366,12 +333,12 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun refreshMediaPresentation() {
-        if (PreferencesManager.isUseCustomMediaPlayback(this)) {
-            updateSilentNotification()
+        try {
+            triggerNotificationUpdate()
+        } catch (e: Exception) {
+            Log.w(TAG, "Media3 notification refresh failed: ${e.message}")
         }
-        // MediaSession metadata is sourced directly from the current MediaItem's MediaMetadata.
-        // onMediaItemTransition/onMediaMetadataChanged cover manual next/previous, auto advance,
-        // indexed seeks and any metadata replacement.
+        if (PreferencesManager.isUseCustomMediaPlayback(this)) updateSilentNotification()
     }
 
     private fun buildSilentPlaybackNotification(): Notification {
@@ -384,7 +351,6 @@ class PlaybackService : MediaSessionService() {
         val indexText = if (total > 0) "[${idx + 1}/$total]" else ""
         val isPlaying = player?.isPlaying == true
         val statusText = if (isPlaying) "再生中" else "一時停止中"
-
         val tapIntent = PendingIntent.getActivity(
             this,
             0,
@@ -394,17 +360,15 @@ class PlaybackService : MediaSessionService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        fun buildActionIntent(command: String): PendingIntent {
-            return PendingIntent.getBroadcast(
-                this,
-                command.hashCode(),
-                Intent(this, ControlReceiver::class.java).apply {
-                    action = ControlReceiver.ACTION_CONTROL
-                    putExtra(ControlReceiver.EXTRA_COMMAND, command)
-                },
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-        }
+        fun buildActionIntent(command: String): PendingIntent = PendingIntent.getBroadcast(
+            this,
+            command.hashCode(),
+            Intent(this, ControlReceiver::class.java).apply {
+                action = ControlReceiver.ACTION_CONTROL
+                putExtra(ControlReceiver.EXTRA_COMMAND, command)
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
 
         val builder = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
@@ -412,17 +376,12 @@ class PlaybackService : MediaSessionService() {
             .setContentText(if (artist.isBlank()) statusText else "$artist ・ $statusText")
             .setContentIntent(tapIntent)
             .addAction(0, "前へ", buildActionIntent(ControlReceiver.CMD_PREVIOUS))
-            .addAction(
-                0,
-                if (isPlaying) "一時停止" else "再生",
-                buildActionIntent(if (isPlaying) ControlReceiver.CMD_PAUSE else ControlReceiver.CMD_PLAY)
-            )
+            .addAction(0, if (isPlaying) "一時停止" else "再生", buildActionIntent(if (isPlaying) ControlReceiver.CMD_PAUSE else ControlReceiver.CMD_PLAY))
             .addAction(0, "次へ", buildActionIntent(ControlReceiver.CMD_NEXT))
             .addAction(0, "停止", buildActionIntent(ControlReceiver.CMD_STOP))
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .setSilent(true)
-
         loadArtworkBitmap(metadata?.artworkUri)?.let(builder::setLargeIcon)
         return builder.build()
     }
@@ -430,7 +389,7 @@ class PlaybackService : MediaSessionService() {
     private fun loadArtworkBitmap(uri: Uri?): Bitmap? {
         if (uri == null) return null
         return try {
-            contentResolver.openInputStream(uri)?.use(BitmapFactory::decodeStream)
+            contentResolver.openInputStream(uri)?.use { input -> BitmapFactory.decodeStream(input) }
         } catch (e: Exception) {
             Log.d(TAG, "Artwork load failed for $uri: ${e.message}")
             null
@@ -470,30 +429,26 @@ class PlaybackService : MediaSessionService() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = getSystemService(NotificationManager::class.java)
         if (nm.getNotificationChannel(NOTIFICATION_CHANNEL_ID) == null) {
-            nm.createNotificationChannel(
-                NotificationChannel(
-                    NOTIFICATION_CHANNEL_ID,
-                    getString(R.string.notification_channel_name),
-                    NotificationManager.IMPORTANCE_LOW
-                ).apply {
-                    description = "音楽の再生状態を表示します"
-                    setShowBadge(false)
-                    lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-                }
-            )
+            nm.createNotificationChannel(NotificationChannel(
+                NOTIFICATION_CHANNEL_ID,
+                getString(R.string.notification_channel_name),
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "音楽の再生状態を表示します"
+                setShowBadge(false)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            })
         }
         if (nm.getNotificationChannel(NOTIFICATION_CHANNEL_ID_IDLE) == null) {
-            nm.createNotificationChannel(
-                NotificationChannel(
-                    NOTIFICATION_CHANNEL_ID_IDLE,
-                    getString(R.string.notification_channel_idle_name),
-                    NotificationManager.IMPORTANCE_LOW
-                ).apply {
-                    description = "待機状態の通知を表示します"
-                    setShowBadge(false)
-                    lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-                }
-            )
+            nm.createNotificationChannel(NotificationChannel(
+                NOTIFICATION_CHANNEL_ID_IDLE,
+                getString(R.string.notification_channel_idle_name),
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "待機状態の通知を表示します"
+                setShowBadge(false)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            })
         }
     }
 
@@ -504,15 +459,11 @@ class PlaybackService : MediaSessionService() {
             AudioManager.AUDIOFOCUS_LOSS,
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> player.pause()
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                val base = if (PreferencesManager.isEnableAppVolume(this)) {
-                    PreferencesManager.getAppPlaybackVolume(this)
-                } else 1.0f
+                val base = if (PreferencesManager.isEnableAppVolume(this)) PreferencesManager.getAppPlaybackVolume(this) else 1.0f
                 applyVolume(base * 0.2f)
             }
             AudioManager.AUDIOFOCUS_GAIN -> {
-                val base = if (PreferencesManager.isEnableAppVolume(this)) {
-                    PreferencesManager.getAppPlaybackVolume(this)
-                } else 1.0f
+                val base = if (PreferencesManager.isEnableAppVolume(this)) PreferencesManager.getAppPlaybackVolume(this) else 1.0f
                 applyVolume(base)
             }
         }
@@ -522,12 +473,10 @@ class PlaybackService : MediaSessionService() {
         if (PreferencesManager.isBlockAudioFocusSend(this)) return true
         if (audioFocusRequest == null) {
             audioFocusRequest = android.media.AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-                .setAudioAttributes(
-                    android.media.AudioAttributes.Builder()
-                        .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
-                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
-                        .build()
-                )
+                .setAudioAttributes(android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build())
                 .setOnAudioFocusChangeListener(audioFocusChangeListener)
                 .build()
         }
@@ -535,9 +484,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun abandonAudioFocus() {
-        audioFocusRequest?.let {
-            try { audioManager.abandonAudioFocusRequest(it) } catch (_: Exception) {}
-        }
+        audioFocusRequest?.let { try { audioManager.abandonAudioFocusRequest(it) } catch (_: Exception) {} }
     }
 
     private val bluetoothReceiver = object : BroadcastReceiver() {
@@ -547,11 +494,8 @@ class PlaybackService : MediaSessionService() {
             when (intent.action) {
                 BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED,
                 BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED -> {
-                    if (state == BluetoothProfile.STATE_DISCONNECTED && prev == BluetoothProfile.STATE_CONNECTED) {
-                        onAudioDeviceDisconnected()
-                    } else if (state == BluetoothProfile.STATE_CONNECTED) {
-                        onAudioDeviceReconnected()
-                    }
+                    if (state == BluetoothProfile.STATE_DISCONNECTED && prev == BluetoothProfile.STATE_CONNECTED) onAudioDeviceDisconnected()
+                    else if (state == BluetoothProfile.STATE_CONNECTED) onAudioDeviceReconnected()
                 }
             }
         }
@@ -561,7 +505,6 @@ class PlaybackService : MediaSessionService() {
         override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) {
             if (addedDevices.any { isWiredDevice(it) }) onAudioDeviceReconnected()
         }
-
         override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) {
             if (removedDevices.any { isWiredDevice(it) }) onAudioDeviceDisconnected()
         }
@@ -587,8 +530,7 @@ class PlaybackService : MediaSessionService() {
             AudioDeviceInfo.TYPE_LINE_ANALOG,
             AudioDeviceInfo.TYPE_LINE_DIGITAL
         )
-        return audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-            .filter { it.type in externalTypes }
+        return audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).filter { it.type in externalTypes }
     }
 
     private fun isExternalAudioDeviceConnected(): Boolean = externalOutputDevices().isNotEmpty()
@@ -596,17 +538,12 @@ class PlaybackService : MediaSessionService() {
     private fun currentOutputRouteKey(): String {
         val external = externalOutputDevices()
         if (external.isEmpty()) return "speaker"
-        return external
-            .map { "${it.type}:${it.address}" }
-            .sorted()
-            .joinToString("|")
+        return external.map { "${it.type}:${it.address}" }.sorted().joinToString("|")
     }
 
     private fun isMusicStreamMuted(): Boolean {
         val volume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-        val muted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            audioManager.isStreamMute(AudioManager.STREAM_MUSIC)
-        } else false
+        val muted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) audioManager.isStreamMute(AudioManager.STREAM_MUSIC) else false
         return volume == 0 || muted
     }
 
@@ -622,30 +559,24 @@ class PlaybackService : MediaSessionService() {
             var wasMuted = isMusicStreamMuted()
             while (isActive) {
                 delay(MUTE_MONITOR_INTERVAL_MS)
-
                 if (!PreferencesManager.isBlockSpeakerMutePlaybackEnabled(this@PlaybackService)) {
                     pausedByMute = false
                     mutedRouteKey = null
                     wasMuted = isMusicStreamMuted()
                     continue
                 }
-
                 val muted = isMusicStreamMuted()
                 val player = exoPlayer
-
                 if (muted && !wasMuted && player?.isPlaying == true) {
                     pausedByMute = true
                     mutedRouteKey = currentOutputRouteKey()
                     player.pause()
                     Log.d(TAG, "Volume zero: paused route=$mutedRouteKey")
                 }
-
                 if (!muted && pausedByMute && player != null) {
                     val currentRoute = currentOutputRouteKey()
-                    if (currentRoute == mutedRouteKey &&
-                        player.mediaItemCount > 0 &&
-                        player.playbackState != Player.STATE_IDLE &&
-                        player.playbackState != Player.STATE_ENDED
+                    if (currentRoute == mutedRouteKey && player.mediaItemCount > 0 &&
+                        player.playbackState != Player.STATE_IDLE && player.playbackState != Player.STATE_ENDED
                     ) {
                         pausedByMute = false
                         mutedRouteKey = null
@@ -671,7 +602,6 @@ class PlaybackService : MediaSessionService() {
         if (!PreferencesManager.isAutoBluetoothControlEnabled(this)) return
         val player = exoPlayer ?: return
         if (!pausedByDisconnect) return
-
         if (PreferencesManager.isAutoResumeTimeoutEnabled(this)) {
             val timeout = PreferencesManager.getAutoResumeTimeoutMs(this)
             if (System.currentTimeMillis() - lastDisconnectTimeMs > timeout) {
@@ -679,7 +609,6 @@ class PlaybackService : MediaSessionService() {
                 return
             }
         }
-
         reconnectJob?.cancel()
         reconnectJob = serviceScope.launch {
             val delayMs = PreferencesManager.getBluetoothReconnectDelayMs(this@PlaybackService)
@@ -688,14 +617,11 @@ class PlaybackService : MediaSessionService() {
                 pausedByDisconnect = false
                 return@launch
             }
-
             pausedByDisconnect = false
             if (shouldBlockPlayback()) {
                 pausedByMute = true
                 mutedRouteKey = currentOutputRouteKey()
-            } else {
-                player.play()
-            }
+            } else player.play()
         }
     }
 
@@ -704,11 +630,8 @@ class PlaybackService : MediaSessionService() {
             addAction(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED)
             addAction(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED)
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(bluetoothReceiver, filter, Context.RECEIVER_EXPORTED)
-        } else {
-            registerReceiver(bluetoothReceiver, filter)
-        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) registerReceiver(bluetoothReceiver, filter, Context.RECEIVER_EXPORTED)
+        else registerReceiver(bluetoothReceiver, filter)
         audioManager.registerAudioDeviceCallback(audioDeviceCallback, null)
     }
 
@@ -735,12 +658,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun playFromUri(context: Context, folderUri: Uri) {
-        playFromUriAt(
-            context,
-            folderUri,
-            PreferencesManager.loadTrackIndex(context),
-            PreferencesManager.loadPlaybackPosition(context)
-        )
+        playFromUriAt(context, folderUri, PreferencesManager.loadTrackIndex(context), PreferencesManager.loadPlaybackPosition(context))
     }
 
     private fun playFromUriFromStart(context: Context, folderUri: Uri) {
@@ -748,12 +666,7 @@ class PlaybackService : MediaSessionService() {
         playFromUriAt(context, folderUri, 0, 0L)
     }
 
-    private fun playFromUriAt(
-        context: Context,
-        folderUri: Uri,
-        startIndex: Int,
-        startPositionMs: Long = 0L
-    ) {
+    private fun playFromUriAt(context: Context, folderUri: Uri, startIndex: Int, startPositionMs: Long = 0L) {
         currentFolderUri = folderUri
         PreferencesManager.saveFolderUri(context, folderUri)
         serviceScope.launch {
@@ -761,9 +674,8 @@ class PlaybackService : MediaSessionService() {
             scanJob = coroutineContext[Job]
             try {
                 val tracks = withContext(Dispatchers.IO) { FolderScanner.scanFolder(context, folderUri) }
-                if (tracks.isEmpty()) {
-                    sendErrorBroadcast(context, "no_files", "音楽ファイルが見つかりません")
-                } else {
+                if (tracks.isEmpty()) sendErrorBroadcast(context, "no_files", "音楽ファイルが見つかりません")
+                else {
                     playlist = tracks
                     consecutiveErrors = 0
                     loadPlaylist(tracks, startIndex.coerceIn(0, tracks.size - 1), startPositionMs)
@@ -782,11 +694,7 @@ class PlaybackService : MediaSessionService() {
 
     private fun loadPlaylist(tracks: List<Track>, startIndex: Int, startPositionMs: Long) {
         val player = exoPlayer ?: return
-        applyVolume(
-            if (PreferencesManager.isEnableAppVolume(this)) {
-                PreferencesManager.getAppPlaybackVolume(this)
-            } else 1.0f
-        )
+        applyVolume(if (PreferencesManager.isEnableAppVolume(this)) PreferencesManager.getAppPlaybackVolume(this) else 1.0f)
         clearAutomaticPauseReasons()
         player.setMediaItems(
             tracks.map { track ->
@@ -805,9 +713,7 @@ class PlaybackService : MediaSessionService() {
             pausedByMute = true
             mutedRouteKey = currentOutputRouteKey()
             handlePlaybackBlocked()
-        } else {
-            player.playWhenReady = true
-        }
+        } else player.playWhenReady = true
     }
 
     private fun setupLoudnessEnhancer(audioSessionId: Int) {
@@ -815,14 +721,8 @@ class PlaybackService : MediaSessionService() {
         loudnessEnhancer = null
         if (audioSessionId == C.AUDIO_SESSION_ID_UNSET) return
         try {
-            loudnessEnhancer = android.media.audiofx.LoudnessEnhancer(audioSessionId).also {
-                it.enabled = true
-            }
-            applyVolume(
-                if (PreferencesManager.isEnableAppVolume(this)) {
-                    PreferencesManager.getAppPlaybackVolume(this)
-                } else 1.0f
-            )
+            loudnessEnhancer = android.media.audiofx.LoudnessEnhancer(audioSessionId).also { it.enabled = true }
+            applyVolume(if (PreferencesManager.isEnableAppVolume(this)) PreferencesManager.getAppPlaybackVolume(this) else 1.0f)
         } catch (e: Exception) {
             Log.w(TAG, "LoudnessEnhancer unavailable: ${e.message}")
             loudnessEnhancer = null
@@ -831,23 +731,17 @@ class PlaybackService : MediaSessionService() {
 
     private fun applyVolume(volume: Float) {
         val player = exoPlayer ?: return
-        val clamped = if (volume.isFinite()) {
-            volume.coerceIn(0.0f, PreferencesManager.MAX_APP_PLAYBACK_VOLUME)
-        } else 1.0f
-
+        val clamped = if (volume.isFinite()) volume.coerceIn(0.0f, PreferencesManager.MAX_APP_PLAYBACK_VOLUME) else 1.0f
         try {
             player.volume = clamped.coerceAtMost(1.0f)
         } catch (e: Exception) {
             Log.e(TAG, "Base volume failed", e)
             try { player.volume = 1.0f } catch (_: Exception) {}
         }
-
         val enhancer = loudnessEnhancer ?: return
         try {
             val gainMb = if (clamped > 1.0f) {
-                (20.0 * log10(clamped.toDouble()) * 100.0)
-                    .toInt()
-                    .coerceIn(0, MAX_LOUDNESS_GAIN_MB)
+                (20.0 * log10(clamped.toDouble()) * 100.0).toInt().coerceIn(0, MAX_LOUDNESS_GAIN_MB)
             } else 0
             enhancer.setTargetGain(gainMb)
             if (!enhancer.enabled) enhancer.enabled = true
@@ -857,15 +751,13 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
-    private fun buildMediaMetadata(track: Track): MediaMetadata {
-        return MediaMetadata.Builder()
-            .setTitle(track.name)
-            .setArtist(track.artist ?: "Unknown Artist")
-            .setAlbumTitle(track.album ?: "Unknown Album")
-            .setArtworkUri(track.artworkUri)
-            .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
-            .build()
-    }
+    private fun buildMediaMetadata(track: Track): MediaMetadata = MediaMetadata.Builder()
+        .setTitle(track.name)
+        .setArtist(track.artist ?: "Unknown Artist")
+        .setAlbumTitle(track.album ?: "Unknown Album")
+        .setArtworkUri(track.artworkUri)
+        .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+        .build()
 
     private fun stopPlayback() {
         clearAutomaticPauseReasons()
@@ -902,11 +794,9 @@ class PlaybackService : MediaSessionService() {
         const val EXTRA_ERROR_MESSAGE = "message"
         const val ERROR_PLAYBACK_FAILED = "playback_failed"
         const val CMD_FORCE_PLAY = "force_play"
-
         const val NOTIFICATION_CHANNEL_ID = "intentplayer_playback"
         const val NOTIFICATION_CHANNEL_ID_IDLE = "intentplayer_idle"
         const val FOREGROUND_NOTIFICATION_ID = 1001
-
         private const val CMD_APP_VOLUME = "app_volume"
         private const val EXTRA_APP_VOLUME = "volume"
         private const val POSITION_SAVE_INTERVAL_MS = 5_000L
