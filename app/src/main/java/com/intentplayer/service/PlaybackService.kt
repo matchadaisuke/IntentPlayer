@@ -111,7 +111,6 @@ class PlaybackService : MediaSessionService() {
     override fun onDestroy() {
         saveCurrentPosition()
         notificationTickerJob?.cancel()
-        notificationTickerJob = null
         reconnectJob?.cancel()
         scanJob?.cancel()
         serviceScope.cancel()
@@ -135,35 +134,30 @@ class PlaybackService : MediaSessionService() {
                     try { Uri.parse(folderUriStr) } catch (_: Exception) { null }
                 } else PreferencesManager.loadFolderUri(this)
                 val index = intent.getIntExtra("index", -1)
-                if (folderUri != null) {
-                    if (shouldBlockPlayback()) {
-                        handlePlaybackBlocked()
-                        return
-                    }
-                    clearAutomaticPauseReasons()
-                    if (command == CMD_FORCE_PLAY) {
-                        playFromUriFromStart(this, folderUri)
-                    } else {
-                        val player = exoPlayer
-                        val reusableQueue = player != null &&
-                            currentFolderUri == folderUri &&
-                            player.mediaItemCount > 0 &&
-                            player.playbackState != Player.STATE_IDLE &&
-                            player.playbackState != Player.STATE_ENDED
-
-                        if (reusableQueue && player != null) {
-                            if (index >= 0) {
-                                val target = index.coerceIn(0, player.mediaItemCount - 1)
-                                player.seekTo(target, 0L)
-                            }
-                            player.setPlaybackSpeed(requestedPlaybackSpeed)
-                            player.play()
-                        } else {
-                            if (index >= 0) playFromUriAt(this, folderUri, index) else playFromUri(this, folderUri)
-                        }
-                    }
-                } else {
+                if (folderUri == null) {
                     sendErrorBroadcast(this, "no_folder_uri", "再生するフォルダが設定されていません")
+                    return
+                }
+                clearAutomaticPauseReasons()
+                if (command == CMD_FORCE_PLAY) {
+                    playFromUriFromStart(this, folderUri)
+                    return
+                }
+                val player = exoPlayer
+                val reusableQueue = player != null &&
+                    currentFolderUri == folderUri &&
+                    player.mediaItemCount > 0 &&
+                    player.playbackState != Player.STATE_IDLE &&
+                    player.playbackState != Player.STATE_ENDED
+                if (reusableQueue && player != null) {
+                    if (index >= 0) {
+                        val target = index.coerceIn(0, player.mediaItemCount - 1)
+                        player.seekTo(target, 0L)
+                    }
+                    player.setPlaybackSpeed(requestedPlaybackSpeed)
+                    if (canStartPlayback()) player.play()
+                } else {
+                    if (index >= 0) playFromUriAt(this, folderUri, index) else playFromUri(this, folderUri)
                 }
             }
             ControlReceiver.CMD_PAUSE -> {
@@ -234,6 +228,18 @@ class PlaybackService : MediaSessionService() {
         mutedRouteKey = null
     }
 
+    private fun canStartPlayback(): Boolean {
+        if (shouldBlockPlayback()) {
+            handlePlaybackBlocked()
+            return false
+        }
+        if (!requestAudioFocus()) {
+            sendErrorBroadcast(this, "audio_focus_denied", "他のアプリが音声を使用しているため再生を開始できませんでした。オーディオフォーカス設定を確認してください。")
+            return false
+        }
+        return true
+    }
+
     private fun initExoPlayer() {
         val player = ExoPlayer.Builder(this)
             .setAudioAttributes(
@@ -286,8 +292,7 @@ class PlaybackService : MediaSessionService() {
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (isPlaying) requestAudioFocus()
-                else if (!player.playWhenReady) abandonAudioFocus()
+                if (!isPlaying && !player.playWhenReady) abandonAudioFocus()
             }
 
             override fun onPositionDiscontinuity(
@@ -322,10 +327,7 @@ class PlaybackService : MediaSessionService() {
 
         playerWrapper = object : ForwardingPlayer(player) {
             override fun play() {
-                if (shouldBlockPlayback()) {
-                    handlePlaybackBlocked()
-                    return
-                }
+                if (!canStartPlayback()) return
                 clearAutomaticPauseReasons()
                 super.play()
             }
@@ -334,10 +336,7 @@ class PlaybackService : MediaSessionService() {
                 super.pause()
             }
             override fun setPlayWhenReady(playWhenReady: Boolean) {
-                if (playWhenReady && shouldBlockPlayback()) {
-                    handlePlaybackBlocked()
-                    return
-                }
+                if (playWhenReady && !canStartPlayback()) return
                 if (playWhenReady) clearAutomaticPauseReasons()
                 super.setPlayWhenReady(playWhenReady)
             }
@@ -505,7 +504,6 @@ class PlaybackService : MediaSessionService() {
     private fun calculateRemainingTimesMs(): Pair<Long, Long> {
         val player = exoPlayer ?: return 0L to 0L
         if (player.mediaItemCount <= 0) return 0L to 0L
-
         val index = player.currentMediaItemIndex.coerceAtLeast(0)
         val currentDurationMs = player.duration.takeIf { it > 0L }
             ?: playlist.getOrNull(index)?.durationMs?.takeIf { it > 0L }
@@ -515,12 +513,9 @@ class PlaybackService : MediaSessionService() {
         val followingMediaMs = if (index + 1 < playlist.size) {
             playlist.subList(index + 1, playlist.size).sumOf { it.durationMs.coerceAtLeast(0L) }
         } else 0L
-
         val speed = PreferencesManager.normalizePlaybackSpeed(requestedPlaybackSpeed)
         val fileRemainingMs = (currentRemainingMediaMs / speed).toLong().coerceAtLeast(0L)
-        val folderRemainingMs = ((currentRemainingMediaMs + followingMediaMs) / speed)
-            .toLong()
-            .coerceAtLeast(0L)
+        val folderRemainingMs = ((currentRemainingMediaMs + followingMediaMs) / speed).toLong().coerceAtLeast(0L)
         return fileRemainingMs to folderRemainingMs
     }
 
@@ -734,7 +729,8 @@ class PlaybackService : MediaSessionService() {
                 if (!muted && pausedByMute && player != null) {
                     val currentRoute = currentOutputRouteKey()
                     if (currentRoute == mutedRouteKey && player.mediaItemCount > 0 &&
-                        player.playbackState != Player.STATE_IDLE && player.playbackState != Player.STATE_ENDED
+                        player.playbackState != Player.STATE_IDLE && player.playbackState != Player.STATE_ENDED &&
+                        canStartPlayback()
                     ) {
                         pausedByMute = false
                         mutedRouteKey = null
@@ -776,15 +772,13 @@ class PlaybackService : MediaSessionService() {
                 pausedByDisconnect = false
                 return@launch
             }
-            pausedByDisconnect = false
-            if (shouldBlockPlayback()) {
-                pausedByMute = true
-                mutedRouteKey = currentOutputRouteKey()
-                handlePlaybackBlocked()
-            } else {
-                player.setPlaybackSpeed(requestedPlaybackSpeed)
-                player.play()
+            if (!canStartPlayback()) {
+                pausedByDisconnect = false
+                return@launch
             }
+            pausedByDisconnect = false
+            player.setPlaybackSpeed(requestedPlaybackSpeed)
+            player.play()
         }
     }
 
@@ -914,13 +908,14 @@ class PlaybackService : MediaSessionService() {
         )
         player.setPlaybackSpeed(requestedPlaybackSpeed)
         player.prepare()
-        if (shouldBlockPlayback()) {
-            player.playWhenReady = false
-            pausedByMute = true
-            mutedRouteKey = currentOutputRouteKey()
-            handlePlaybackBlocked()
-        } else {
+        if (canStartPlayback()) {
             player.playWhenReady = true
+        } else {
+            player.playWhenReady = false
+            if (shouldBlockPlayback()) {
+                pausedByMute = true
+                mutedRouteKey = currentOutputRouteKey()
+            }
         }
     }
 
@@ -939,23 +934,17 @@ class PlaybackService : MediaSessionService() {
 
     private fun applyVolume(volume: Float) {
         val player = exoPlayer ?: return
-        val clamped = if (volume.isFinite()) {
-            volume.coerceIn(0.0f, PreferencesManager.MAX_APP_PLAYBACK_VOLUME)
-        } else 1.0f
-
+        val clamped = if (volume.isFinite()) volume.coerceIn(0.0f, PreferencesManager.MAX_APP_PLAYBACK_VOLUME) else 1.0f
         try {
             player.volume = clamped.coerceAtMost(1.0f)
         } catch (e: Exception) {
             Log.e(TAG, "Base volume failed", e)
             try { player.volume = 1.0f } catch (_: Exception) {}
         }
-
         val enhancer = loudnessEnhancer ?: return
         try {
             val gainMb = if (clamped > 1.0f) {
-                (20.0 * log10(clamped.toDouble()) * 100.0)
-                    .toInt()
-                    .coerceIn(0, MAX_LOUDNESS_GAIN_MB)
+                (20.0 * log10(clamped.toDouble()) * 100.0).toInt().coerceIn(0, MAX_LOUDNESS_GAIN_MB)
             } else 0
             enhancer.setTargetGain(gainMb)
             if (!enhancer.enabled) enhancer.enabled = true
@@ -974,6 +963,7 @@ class PlaybackService : MediaSessionService() {
 
     private fun stopPlayback() {
         clearAutomaticPauseReasons()
+        abandonAudioFocus()
         exoPlayer?.stop()
         exoPlayer?.clearMediaItems()
         playlist = emptyList()
@@ -985,7 +975,6 @@ class PlaybackService : MediaSessionService() {
 
     private fun sendEventBroadcast(event: String, trackName: String) {
         sendBroadcast(Intent(ACTION_PLAYBACK_EVENT).apply {
-            setPackage(packageName)
             putExtra(EXTRA_EVENT, event)
             putExtra(EXTRA_TRACK_NAME, trackName)
             putExtra(EXTRA_FOLDER_URI_KEY, currentFolderUri?.toString() ?: "")
@@ -994,7 +983,6 @@ class PlaybackService : MediaSessionService() {
 
     private fun sendErrorBroadcast(context: Context, reason: String, message: String) {
         context.sendBroadcast(Intent(ACTION_ERROR).apply {
-            setPackage(context.packageName)
             putExtra(EXTRA_ERROR_REASON, reason)
             putExtra(EXTRA_ERROR_MESSAGE, message)
         })
