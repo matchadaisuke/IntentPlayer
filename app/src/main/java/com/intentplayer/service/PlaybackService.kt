@@ -82,6 +82,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+        requestedPlaybackSpeed = PreferencesManager.getPlaybackSpeed(this)
         ensureNotificationChannel()
         startForeground(FOREGROUND_NOTIFICATION_ID, buildIdleNotification())
         initExoPlayer()
@@ -111,6 +112,8 @@ class PlaybackService : MediaSessionService() {
         saveCurrentPosition()
         notificationTickerJob?.cancel()
         notificationTickerJob = null
+        reconnectJob?.cancel()
+        scanJob?.cancel()
         serviceScope.cancel()
         unregisterReceivers()
         abandonAudioFocus()
@@ -159,6 +162,8 @@ class PlaybackService : MediaSessionService() {
                             if (index >= 0) playFromUriAt(this, folderUri, index) else playFromUri(this, folderUri)
                         }
                     }
+                } else {
+                    sendErrorBroadcast(this, "no_folder_uri", "再生するフォルダが設定されていません")
                 }
             }
             ControlReceiver.CMD_PAUSE -> {
@@ -190,7 +195,10 @@ class PlaybackService : MediaSessionService() {
                 }
             }
             ControlReceiver.CMD_SPEED -> {
-                requestedPlaybackSpeed = intent.getFloatExtra(ControlReceiver.EXTRA_SPEED, 1.0f).coerceIn(0.5f, 2.0f)
+                requestedPlaybackSpeed = PreferencesManager.normalizePlaybackSpeed(
+                    intent.getFloatExtra(ControlReceiver.EXTRA_SPEED, PreferencesManager.getPlaybackSpeed(this))
+                )
+                PreferencesManager.setPlaybackSpeed(this, requestedPlaybackSpeed)
                 exoPlayer?.setPlaybackSpeed(requestedPlaybackSpeed)
                 refreshMediaPresentation()
             }
@@ -239,6 +247,7 @@ class PlaybackService : MediaSessionService() {
             .setWakeMode(C.WAKE_MODE_LOCAL)
             .build()
 
+        player.setPlaybackSpeed(requestedPlaybackSpeed)
         player.addListener(object : Player.Listener {
             override fun onAudioSessionIdChanged(audioSessionId: Int) {
                 setupLoudnessEnhancer(audioSessionId)
@@ -300,8 +309,10 @@ class PlaybackService : MediaSessionService() {
                     stopPlayback()
                     return
                 }
-                if (player.hasNextMediaItem()) player.seekToNextMediaItem()
-                else {
+                if (player.hasNextMediaItem()) {
+                    player.seekToNextMediaItem()
+                    player.setPlaybackSpeed(requestedPlaybackSpeed)
+                } else {
                     consecutiveErrors = 0
                     stopPlayback()
                 }
@@ -338,15 +349,18 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
+    private fun playerActivityIntent(): Intent = Intent(this, MainActivity::class.java).apply {
+        flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+        putExtra(MainActivity.EXTRA_OPEN_PLAYER_TAB, true)
+    }
+
     private fun initMediaSession() {
         if (PreferencesManager.isUseCustomMediaPlayback(this) || mediaSession != null) return
         val player = playerWrapper ?: return
         val sessionActivityPi = PendingIntent.getActivity(
             this,
             0,
-            Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
-            },
+            playerActivityIntent(),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         mediaSession = MediaSession.Builder(this, player)
@@ -448,9 +462,7 @@ class PlaybackService : MediaSessionService() {
         val tapIntent = PendingIntent.getActivity(
             this,
             0,
-            Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
-            },
+            playerActivityIntent(),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         fun buildActionIntent(command: String): PendingIntent = PendingIntent.getBroadcast(
@@ -502,11 +514,9 @@ class PlaybackService : MediaSessionService() {
         val currentRemainingMediaMs = (currentDurationMs - currentPositionMs).coerceAtLeast(0L)
         val followingMediaMs = if (index + 1 < playlist.size) {
             playlist.subList(index + 1, playlist.size).sumOf { it.durationMs.coerceAtLeast(0L) }
-        } else {
-            0L
-        }
+        } else 0L
 
-        val speed = requestedPlaybackSpeed.takeIf { it > 0f } ?: 1f
+        val speed = PreferencesManager.normalizePlaybackSpeed(requestedPlaybackSpeed)
         val fileRemainingMs = (currentRemainingMediaMs / speed).toLong().coerceAtLeast(0L)
         val folderRemainingMs = ((currentRemainingMediaMs + followingMediaMs) / speed)
             .toLong()
@@ -520,7 +530,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun formatRemainingClock(ms: Long): String {
-        val totalSeconds = ((ms.coerceAtLeast(0L) + 999L) / 1000L)
+        val totalSeconds = (ms.coerceAtLeast(0L) + 999L) / 1000L
         val hours = totalSeconds / 3600L
         val minutes = (totalSeconds % 3600L) / 60L
         val seconds = totalSeconds % 60L
@@ -558,9 +568,7 @@ class PlaybackService : MediaSessionService() {
         val tapIntent = PendingIntent.getActivity(
             this,
             0,
-            Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
-            },
+            playerActivityIntent(),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID_IDLE)
@@ -687,7 +695,7 @@ class PlaybackService : MediaSessionService() {
     private fun currentOutputRouteKey(): String {
         val external = externalOutputDevices()
         if (external.isEmpty()) return "speaker"
-        return external.map { "${it.type}:${it.address}" }.sorted().joinToString("|")
+        return external.map { "${it.type}:${runCatching { it.address }.getOrDefault("")}" }.sorted().joinToString("|")
     }
 
     private fun isMusicStreamMuted(): Boolean {
@@ -785,9 +793,21 @@ class PlaybackService : MediaSessionService() {
             addAction(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED)
             addAction(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED)
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) registerReceiver(bluetoothReceiver, filter, Context.RECEIVER_EXPORTED)
-        else registerReceiver(bluetoothReceiver, filter)
-        audioManager.registerAudioDeviceCallback(audioDeviceCallback, null)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(bluetoothReceiver, filter, Context.RECEIVER_EXPORTED)
+            } else {
+                registerReceiver(bluetoothReceiver, filter)
+            }
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Bluetooth receiver unavailable: ${e.message}")
+            PreferencesManager.saveErrorLog(this, "Bluetooth権限不足: ${e.message}")
+        }
+        try {
+            audioManager.registerAudioDeviceCallback(audioDeviceCallback, null)
+        } catch (e: Exception) {
+            Log.w(TAG, "Audio device callback unavailable: ${e.message}")
+        }
     }
 
     private fun unregisterReceivers() {
@@ -822,7 +842,12 @@ class PlaybackService : MediaSessionService() {
             putExtra(EXTRA_STATE_INDEX, index)
             putExtra(EXTRA_STATE_IS_PLAYING, isPlaybackRequested(player))
             putExtra(EXTRA_STATE_POSITION_MS, player.currentPosition.coerceAtLeast(0L))
-            putExtra(EXTRA_STATE_DURATION_MS, player.duration.takeIf { it > 0 } ?: playlist.getOrNull(index)?.durationMs?.takeIf { it > 0L } ?: 0L)
+            putExtra(
+                EXTRA_STATE_DURATION_MS,
+                player.duration.takeIf { it > 0 }
+                    ?: playlist.getOrNull(index)?.durationMs?.takeIf { it > 0L }
+                    ?: 0L
+            )
             putExtra(EXTRA_STATE_SPEED, requestedPlaybackSpeed)
             putExtra(EXTRA_STATE_HAS_MEDIA, player.mediaItemCount > 0)
         })
@@ -853,14 +878,15 @@ class PlaybackService : MediaSessionService() {
             scanJob = coroutineContext[Job]
             try {
                 val tracks = withContext(Dispatchers.IO) { FolderScanner.scanFolder(context, folderUri) }
-                if (tracks.isEmpty()) sendErrorBroadcast(context, "no_files", "音楽ファイルが見つかりません")
-                else {
+                if (tracks.isEmpty()) {
+                    sendErrorBroadcast(context, "no_files", "音楽ファイルが見つかりません")
+                } else {
                     playlist = tracks
                     consecutiveErrors = 0
                     loadPlaylist(tracks, startIndex.coerceIn(0, tracks.size - 1), startPositionMs)
                 }
             } catch (e: SecurityException) {
-                val msg = "フォルダへのアクセス権がありません。アプリを開いてフォルダを再選択してください。"
+                val msg = "フォルダへのアクセス権がありません。アプリを開いてフォルダを再選択するか、SAFで選択してください。"
                 sendErrorBroadcast(context, "permission_error", msg)
                 PreferencesManager.saveErrorLog(context, "スキャンエラー(権限): ${e.message}")
             } catch (e: Exception) {
@@ -884,7 +910,7 @@ class PlaybackService : MediaSessionService() {
                     .build()
             },
             startIndex,
-            startPositionMs
+            startPositionMs.coerceAtLeast(0L)
         )
         player.setPlaybackSpeed(requestedPlaybackSpeed)
         player.prepare()
@@ -893,7 +919,9 @@ class PlaybackService : MediaSessionService() {
             pausedByMute = true
             mutedRouteKey = currentOutputRouteKey()
             handlePlaybackBlocked()
-        } else player.playWhenReady = true
+        } else {
+            player.playWhenReady = true
+        }
     }
 
     private fun setupLoudnessEnhancer(audioSessionId: Int) {
@@ -948,12 +976,16 @@ class PlaybackService : MediaSessionService() {
         clearAutomaticPauseReasons()
         exoPlayer?.stop()
         exoPlayer?.clearMediaItems()
+        playlist = emptyList()
+        currentFolderUri = null
         PreferencesManager.clearPlaybackState(this)
+        sendPlaybackStateBroadcast()
         stopSelf()
     }
 
     private fun sendEventBroadcast(event: String, trackName: String) {
         sendBroadcast(Intent(ACTION_PLAYBACK_EVENT).apply {
+            setPackage(packageName)
             putExtra(EXTRA_EVENT, event)
             putExtra(EXTRA_TRACK_NAME, trackName)
             putExtra(EXTRA_FOLDER_URI_KEY, currentFolderUri?.toString() ?: "")
@@ -962,6 +994,7 @@ class PlaybackService : MediaSessionService() {
 
     private fun sendErrorBroadcast(context: Context, reason: String, message: String) {
         context.sendBroadcast(Intent(ACTION_ERROR).apply {
+            setPackage(context.packageName)
             putExtra(EXTRA_ERROR_REASON, reason)
             putExtra(EXTRA_ERROR_MESSAGE, message)
         })
