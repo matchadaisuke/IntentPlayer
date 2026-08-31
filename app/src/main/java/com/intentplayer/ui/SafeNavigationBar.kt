@@ -2,28 +2,27 @@ package com.intentplayer.ui
 
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 
 /**
- * App-wide bottom navigation wrapper.
+ * Bottom navigation that keeps the app bar flush with the content while reserving the
+ * Android navigation/gesture area inside the bar itself.
  *
- * MainScreen intentionally passes zero content insets to avoid the old extra gap above
- * the bottom bar. The navigation bar itself, however, still needs to stay clear of the
- * Android gesture/navigation area. Keeping that responsibility here prevents the two
- * inset policies from being mixed again.
+ * The important detail is that system-bar space is handled by Material3's windowInsets,
+ * not by an outer Modifier.padding/navigationBarsPadding. Outer padding increases the
+ * bottom-bar layout size outside its painted background and can appear as an extra gap.
  */
 @Composable
 fun NavigationBar(
     modifier: Modifier = Modifier,
-    windowInsets: WindowInsets = NavigationBarDefaults.windowInsets,
+    @Suppress("UNUSED_PARAMETER") windowInsets: WindowInsets = NavigationBarDefaults.windowInsets,
     content: @Composable RowScope.() -> Unit
 ) {
     androidx.compose.material3.NavigationBar(
-        modifier = modifier.navigationBarsPadding(),
-        windowInsets = WindowInsets(0, 0, 0, 0),
+        modifier = modifier,
+        windowInsets = NavigationBarDefaults.windowInsets,
         content = content
     )
 }
