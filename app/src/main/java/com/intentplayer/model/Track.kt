@@ -3,8 +3,8 @@ package com.intentplayer.model
 import android.net.Uri
 
 /**
- * 音楽ファイル1曲を表すデータクラス。
- * MediaSession / 通知へ渡すタイトル・アーティスト・アルバム・アートワークを保持する。
+ * 再生対象の音声ファイルを表すデータクラス。
+ * MediaSession / 通知へ渡すタイトル・アルバム・アートワークなどを保持する。
  */
 data class Track(
     val uri: Uri,
