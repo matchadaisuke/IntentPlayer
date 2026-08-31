@@ -395,12 +395,13 @@ private fun AutoResumeTimeoutEditor(
             onValueChange = { input ->
                 val digits = input.filter { it.isDigit() }.take(5)
                 secondsText = digits
-                val parsed = digits.toLongOrNull() ?: return@OutlinedTextField
-                val newMs = (parsed * 1000L).coerceIn(
-                    PreferencesManager.MIN_AUTO_RESUME_TIMEOUT_MS,
-                    PreferencesManager.MAX_AUTO_RESUME_TIMEOUT_MS
-                )
-                onTimeoutChanged(newMs)
+                digits.toLongOrNull()?.let { parsed ->
+                    val newMs = (parsed * 1000L).coerceIn(
+                        PreferencesManager.MIN_AUTO_RESUME_TIMEOUT_MS,
+                        PreferencesManager.MAX_AUTO_RESUME_TIMEOUT_MS
+                    )
+                    onTimeoutChanged(newMs)
+                }
             },
             label = { Text("秒数で指定") },
             supportingText = { Text("10〜86400秒（24時間）。スライダーは大まかに、数値欄で細かく調整できます。") },
