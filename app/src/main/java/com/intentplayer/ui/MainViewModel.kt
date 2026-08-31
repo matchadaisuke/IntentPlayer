@@ -51,7 +51,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val bluetoothReconnectDelayMs = MutableStateFlow(500)
     val blockSpeakerMutePlaybackEnabled = MutableStateFlow(true)
     val autoResumeTimeoutEnabled = MutableStateFlow(false)
-    val autoResumeTimeoutMs = MutableStateFlow(30_000L)
+    val autoResumeTimeoutMs = MutableStateFlow(10L * 60L * 1000L)
     val useCustomMediaPlayback = MutableStateFlow(true)
     val enableAppVolume = MutableStateFlow(true)
     val appPlaybackVolume = MutableStateFlow(1.0f)
@@ -77,26 +77,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (intent.action != PlaybackService.ACTION_PLAYBACK_STATE) return
             val hasMedia = intent.getBooleanExtra(PlaybackService.EXTRA_STATE_HAS_MEDIA, false)
             val index = intent.getIntExtra(PlaybackService.EXTRA_STATE_INDEX, -1)
+            val incomingDuration = intent.getLongExtra(PlaybackService.EXTRA_STATE_DURATION_MS, 0L)
             isPlaying.value = intent.getBooleanExtra(PlaybackService.EXTRA_STATE_IS_PLAYING, false)
-            currentPositionMs.value = intent.getLongExtra(PlaybackService.EXTRA_STATE_POSITION_MS, 0L)
-            durationMs.value = intent.getLongExtra(PlaybackService.EXTRA_STATE_DURATION_MS, 0L)
-            playbackSpeed.value = intent.getFloatExtra(PlaybackService.EXTRA_STATE_SPEED, 1.0f)
-            currentTrack.value = if (hasMedia) tracks.value.getOrNull(index) else null
+            currentPositionMs.value = intent.getLongExtra(PlaybackService.EXTRA_STATE_POSITION_MS, 0L).coerceAtLeast(0L)
+            if (incomingDuration > 0L || !hasMedia) durationMs.value = incomingDuration.coerceAtLeast(0L)
+            playbackSpeed.value = PreferencesManager.normalizePlaybackSpeed(
+                intent.getFloatExtra(PlaybackService.EXTRA_STATE_SPEED, playbackSpeed.value)
+            )
+            currentTrack.value = if (hasMedia) tracks.value.getOrNull(index) ?: currentTrack.value else null
         }
     }
 
     init {
-        silentNotificationEnabled.value = PreferencesManager.isSilentNotificationEnabled(context)
-        autoBluetoothControlEnabled.value = PreferencesManager.isAutoBluetoothControlEnabled(context)
-        blockAudioFocusSend.value = PreferencesManager.isBlockAudioFocusSend(context)
-        blockAudioFocusReceive.value = PreferencesManager.isBlockAudioFocusReceive(context)
-        bluetoothReconnectDelayMs.value = PreferencesManager.getBluetoothReconnectDelayMs(context)
-        blockSpeakerMutePlaybackEnabled.value = PreferencesManager.isBlockSpeakerMutePlaybackEnabled(context)
-        autoResumeTimeoutEnabled.value = PreferencesManager.isAutoResumeTimeoutEnabled(context)
-        autoResumeTimeoutMs.value = PreferencesManager.getAutoResumeTimeoutMs(context)
-        useCustomMediaPlayback.value = PreferencesManager.isUseCustomMediaPlayback(context)
-        enableAppVolume.value = PreferencesManager.isEnableAppVolume(context)
-        appPlaybackVolume.value = PreferencesManager.getAppPlaybackVolume(context)
+        reloadSettingsFromStorage()
         reloadErrorLogs()
 
         try {
@@ -107,11 +100,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         val savedUri = PreferencesManager.loadFolderUri(context)
-        currentScreen.value = if (PreferencesManager.isFirstLaunch(context)) {
-            AppScreen.ONBOARDING
-        } else {
-            AppScreen.MAIN
-        }
+        currentScreen.value = if (PreferencesManager.isFirstLaunch(context)) AppScreen.ONBOARDING else AppScreen.MAIN
 
         if (savedUri != null) {
             folderUri.value = savedUri
@@ -129,6 +118,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         startPositionPolling()
     }
 
+    fun reloadSettingsFromStorage() {
+        silentNotificationEnabled.value = PreferencesManager.isSilentNotificationEnabled(context)
+        autoBluetoothControlEnabled.value = PreferencesManager.isAutoBluetoothControlEnabled(context)
+        blockAudioFocusSend.value = PreferencesManager.isBlockAudioFocusSend(context)
+        blockAudioFocusReceive.value = PreferencesManager.isBlockAudioFocusReceive(context)
+        bluetoothReconnectDelayMs.value = PreferencesManager.getBluetoothReconnectDelayMs(context)
+        blockSpeakerMutePlaybackEnabled.value = PreferencesManager.isBlockSpeakerMutePlaybackEnabled(context)
+        autoResumeTimeoutEnabled.value = PreferencesManager.isAutoResumeTimeoutEnabled(context)
+        autoResumeTimeoutMs.value = PreferencesManager.getAutoResumeTimeoutMs(context)
+        useCustomMediaPlayback.value = PreferencesManager.isUseCustomMediaPlayback(context)
+        enableAppVolume.value = PreferencesManager.isEnableAppVolume(context)
+        appPlaybackVolume.value = PreferencesManager.getAppPlaybackVolume(context)
+        playbackSpeed.value = PreferencesManager.getPlaybackSpeed(context)
+    }
+
     fun completeOnboarding() {
         PreferencesManager.setFirstLaunchCompleted(context)
         currentScreen.value = AppScreen.MAIN
@@ -141,51 +145,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setSilentNotificationEnabled(enabled: Boolean) {
         PreferencesManager.setSilentNotificationEnabled(context, enabled)
-        silentNotificationEnabled.value = enabled
+        silentNotificationEnabled.value = PreferencesManager.isSilentNotificationEnabled(context)
     }
 
     fun setAutoBluetoothControlEnabled(enabled: Boolean) {
         PreferencesManager.setAutoBluetoothControlEnabled(context, enabled)
-        autoBluetoothControlEnabled.value = enabled
+        autoBluetoothControlEnabled.value = PreferencesManager.isAutoBluetoothControlEnabled(context)
     }
 
     fun setBlockAudioFocusSend(block: Boolean) {
         PreferencesManager.setBlockAudioFocusSend(context, block)
-        blockAudioFocusSend.value = block
+        blockAudioFocusSend.value = PreferencesManager.isBlockAudioFocusSend(context)
     }
 
     fun setBlockAudioFocusReceive(block: Boolean) {
         PreferencesManager.setBlockAudioFocusReceive(context, block)
-        blockAudioFocusReceive.value = block
+        blockAudioFocusReceive.value = PreferencesManager.isBlockAudioFocusReceive(context)
     }
 
     fun setBluetoothReconnectDelayMs(delayMs: Int) {
         PreferencesManager.setBluetoothReconnectDelayMs(context, delayMs)
-        bluetoothReconnectDelayMs.value = delayMs
+        bluetoothReconnectDelayMs.value = PreferencesManager.getBluetoothReconnectDelayMs(context)
     }
 
     fun setBlockSpeakerMutePlaybackEnabled(enabled: Boolean) {
         PreferencesManager.setBlockSpeakerMutePlaybackEnabled(context, enabled)
-        blockSpeakerMutePlaybackEnabled.value = enabled
+        blockSpeakerMutePlaybackEnabled.value = PreferencesManager.isBlockSpeakerMutePlaybackEnabled(context)
     }
 
     fun setAutoResumeTimeoutEnabled(enabled: Boolean) {
         PreferencesManager.setAutoResumeTimeoutEnabled(context, enabled)
-        autoResumeTimeoutEnabled.value = enabled
+        autoResumeTimeoutEnabled.value = PreferencesManager.isAutoResumeTimeoutEnabled(context)
     }
 
     fun setAutoResumeTimeoutMs(timeoutMs: Long) {
-        val safe = timeoutMs.coerceIn(
-            PreferencesManager.MIN_AUTO_RESUME_TIMEOUT_MS,
-            PreferencesManager.MAX_AUTO_RESUME_TIMEOUT_MS
-        )
-        PreferencesManager.setAutoResumeTimeoutMs(context, safe)
-        autoResumeTimeoutMs.value = safe
+        PreferencesManager.setAutoResumeTimeoutMs(context, timeoutMs)
+        autoResumeTimeoutMs.value = PreferencesManager.getAutoResumeTimeoutMs(context)
     }
 
     fun setUseCustomMediaPlayback(enabled: Boolean) {
         PreferencesManager.setUseCustomMediaPlayback(context, enabled)
-        useCustomMediaPlayback.value = enabled
+        useCustomMediaPlayback.value = PreferencesManager.isUseCustomMediaPlayback(context)
         sendServiceCommand(PlaybackService.CMD_CUSTOM_MODE) {
             putExtra(PlaybackService.EXTRA_CUSTOM_MODE, enabled)
         }
@@ -201,17 +201,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setEnableAppVolume(enabled: Boolean) {
         PreferencesManager.setEnableAppVolume(context, enabled)
-        enableAppVolume.value = enabled
-        sendAppVolumeToService(if (enabled) appPlaybackVolume.value else 1.0f)
+        enableAppVolume.value = PreferencesManager.isEnableAppVolume(context)
+        sendAppVolumeToService(if (enableAppVolume.value) appPlaybackVolume.value else 1.0f)
     }
 
     fun setAppPlaybackVolume(volume: Float) {
-        val safe = if (volume.isFinite()) {
-            volume.coerceIn(0.0f, PreferencesManager.MAX_APP_PLAYBACK_VOLUME)
-        } else 1.0f
-        PreferencesManager.setAppPlaybackVolume(context, safe)
-        appPlaybackVolume.value = safe
-        sendAppVolumeToService(safe)
+        PreferencesManager.setAppPlaybackVolume(context, volume)
+        appPlaybackVolume.value = PreferencesManager.getAppPlaybackVolume(context)
+        sendAppVolumeToService(appPlaybackVolume.value)
     }
 
     private fun sendAppVolumeToService(volume: Float) {
@@ -221,7 +218,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         try {
             context.startService(intent)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             Log.d(TAG, "PlaybackService is not active; volume will apply on next playback")
         }
     }
@@ -245,6 +242,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 controller = controllerFuture?.get()
                 controllerRetryCount = 0
                 setupControllerListener()
+                controller?.setPlaybackSpeed(playbackSpeed.value)
             } catch (e: Exception) {
                 if (controllerRetryCount < MAX_CONTROLLER_RETRIES) {
                     controllerRetryCount++
@@ -254,6 +252,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 } else {
                     controllerRetryCount = 0
+                    uiMessage.value = "Android標準の再生システムへの接続に失敗しました"
                 }
             }
         }, MoreExecutors.directExecutor())
@@ -268,17 +267,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 mediaItem?.mediaMetadata?.let(::updateCurrentTrackFromMetadata)
-                durationMs.value = c.duration.takeIf { it > 0 } ?: 0L
+                if (c.duration > 0L) durationMs.value = c.duration
             }
 
             override fun onIsPlayingChanged(playing: Boolean) {
-                isPlaying.value = playing
-                if (!playing) playbackSpeed.value = c.playbackParameters.speed
+                isPlaying.value = c.playWhenReady && c.playbackState != Player.STATE_IDLE && c.playbackState != Player.STATE_ENDED
+                playbackSpeed.value = PreferencesManager.normalizePlaybackSpeed(c.playbackParameters.speed)
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
                 when (playbackState) {
-                    Player.STATE_READY -> durationMs.value = c.duration.takeIf { it > 0 } ?: 0L
+                    Player.STATE_READY -> if (c.duration > 0L) durationMs.value = c.duration
                     Player.STATE_IDLE, Player.STATE_ENDED -> {
                         currentTrack.value = null
                         currentPositionMs.value = 0L
@@ -287,8 +286,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         })
-        isPlaying.value = c.isPlaying
-        durationMs.value = c.duration.takeIf { it > 0 } ?: 0L
+        isPlaying.value = c.playWhenReady && c.playbackState != Player.STATE_IDLE && c.playbackState != Player.STATE_ENDED
+        if (c.duration > 0L) durationMs.value = c.duration
+        playbackSpeed.value = PreferencesManager.normalizePlaybackSpeed(c.playbackParameters.speed)
         updateCurrentTrackFromMetadata(c.mediaMetadata)
     }
 
@@ -313,7 +313,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val c = controller
                 if (c != null) {
                     isPlaying.value = c.playWhenReady && c.playbackState != Player.STATE_IDLE && c.playbackState != Player.STATE_ENDED
-                    playbackSpeed.value = c.playbackParameters.speed
+                    playbackSpeed.value = PreferencesManager.normalizePlaybackSpeed(c.playbackParameters.speed)
                     if (c.isPlaying || c.playbackState == Player.STATE_READY || c.playbackState == Player.STATE_BUFFERING) {
                         currentPositionMs.value = c.currentPosition.coerceAtLeast(0L)
                         if (c.duration > 0) durationMs.value = c.duration
@@ -337,9 +337,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onNotificationPermissionResult(isDenied: Boolean) {
         isNotificationPermissionDenied.value = isDenied
-        if (isDenied) {
-            uiMessage.value = "通知権限が拒否されています。設定から通知を許可してください。"
-        }
+        if (isDenied) uiMessage.value = "通知権限が拒否されています。設定から通知を許可してください。"
     }
 
     fun onFolderSelected(uri: Uri) {
@@ -357,18 +355,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val result = withContext(Dispatchers.IO) { FolderScanner.scanFolder(context, uri) }
                 tracks.value = result
                 if (result.isEmpty()) {
+                    currentTrack.value = null
                     uiMessage.value = "フォルダに音楽ファイルが見つかりませんでした"
                 } else {
                     controller?.let { c ->
-                        if (c.isPlaying || c.playbackState == Player.STATE_READY) {
-                            updateCurrentTrackFromMetadata(c.mediaMetadata)
-                        }
+                        if (c.mediaItemCount > 0 && c.playbackState != Player.STATE_IDLE) updateCurrentTrackFromMetadata(c.mediaMetadata)
                     }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Scan failed", e)
                 uiMessage.value = "スキャンエラー: ${e.message}"
                 tracks.value = emptyList()
+                currentTrack.value = null
             } finally {
                 isScanning.value = false
             }
@@ -384,11 +382,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             putExtra("index", index)
         }
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
+            else context.startService(intent)
             if (!useCustomMediaPlayback.value && (controller == null || controller?.isConnected != true)) {
                 viewModelScope.launch {
                     delay(500L)
@@ -404,49 +399,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun pause() {
-        if (useCustomMediaPlayback.value) sendServiceCommand(ControlReceiver.CMD_PAUSE)
-        else controller?.pause()
+        if (useCustomMediaPlayback.value) sendServiceCommand(ControlReceiver.CMD_PAUSE) else controller?.pause()
     }
 
     fun resume() {
-        if (useCustomMediaPlayback.value) sendServiceCommand(ControlReceiver.CMD_PLAY)
-        else controller?.play()
+        if (useCustomMediaPlayback.value) sendServiceCommand(ControlReceiver.CMD_PLAY) else controller?.play()
     }
 
     fun stop() {
-        if (useCustomMediaPlayback.value) sendServiceCommand(ControlReceiver.CMD_STOP)
-        else controller?.stop()
+        if (useCustomMediaPlayback.value) sendServiceCommand(ControlReceiver.CMD_STOP) else controller?.stop()
         currentTrack.value = null
         currentPositionMs.value = 0L
         durationMs.value = 0L
     }
 
     fun next() {
-        if (useCustomMediaPlayback.value) sendServiceCommand(ControlReceiver.CMD_NEXT)
-        else controller?.seekToNextMediaItem()
+        if (useCustomMediaPlayback.value) sendServiceCommand(ControlReceiver.CMD_NEXT) else controller?.seekToNextMediaItem()
     }
 
     fun previous() {
-        if (useCustomMediaPlayback.value) sendServiceCommand(ControlReceiver.CMD_PREVIOUS)
-        else controller?.seekToPreviousMediaItem()
+        if (useCustomMediaPlayback.value) sendServiceCommand(ControlReceiver.CMD_PREVIOUS) else controller?.seekToPreviousMediaItem()
     }
 
     fun seekTo(positionMs: Long) {
+        val safe = positionMs.coerceAtLeast(0L)
         if (useCustomMediaPlayback.value) {
-            sendServiceCommand(ControlReceiver.CMD_SEEK) {
-                putExtra(ControlReceiver.EXTRA_SEEK_TO, positionMs)
-            }
-        } else controller?.seekTo(positionMs)
-        currentPositionMs.value = positionMs
+            sendServiceCommand(ControlReceiver.CMD_SEEK) { putExtra(ControlReceiver.EXTRA_SEEK_TO, safe) }
+        } else {
+            controller?.seekTo(safe)
+        }
+        currentPositionMs.value = safe
     }
 
     fun setPlaybackSpeed(speed: Float) {
-        val safe = speed.coerceIn(0.5f, 2.0f)
+        val safe = PreferencesManager.normalizePlaybackSpeed(speed)
+        PreferencesManager.setPlaybackSpeed(context, safe)
         if (useCustomMediaPlayback.value) {
-            sendServiceCommand(ControlReceiver.CMD_SPEED) {
-                putExtra(ControlReceiver.EXTRA_SPEED, safe)
-            }
-        } else controller?.setPlaybackSpeed(safe)
+            sendServiceCommand(ControlReceiver.CMD_SPEED) { putExtra(ControlReceiver.EXTRA_SPEED, safe) }
+        } else {
+            controller?.setPlaybackSpeed(safe)
+        }
         playbackSpeed.value = safe
     }
 
@@ -463,6 +455,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         } catch (e: Exception) {
             Log.w(TAG, "Service command failed: $command: ${e.message}")
+            uiMessage.value = "操作に失敗しました: ${e.message}"
         }
     }
 
