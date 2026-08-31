@@ -77,15 +77,21 @@ class PlaybackService : MediaSessionService() {
     private var lastNotificationLayout: ImmutableList<CommandButton>? = null
     private var lastNotificationActionFactory: MediaNotification.ActionFactory? = null
     private var notificationChangedCallback: MediaNotification.Provider.Callback? = null
+    private var notificationTickerJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
         ensureNotificationChannel()
         startForeground(FOREGROUND_NOTIFICATION_ID, buildIdleNotification())
         initExoPlayer()
-        initMediaSession()
-        setupNotificationProvider()
+        // 独自再生方式では MediaSession 自体を作らない。
+        // Wear OS / AVRCP / System UI に再生中の曲情報や再生状態を公開しないため。
+        if (!PreferencesManager.isUseCustomMediaPlayback(this)) {
+            initMediaSession()
+            setupNotificationProvider()
+        }
         startPositionSaveLoop()
+        startStateBroadcastLoop()
         startMuteMonitorLoop()
         registerReceivers()
     }
@@ -97,10 +103,8 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
-        if (PreferencesManager.isUseCustomMediaPlayback(this) && controllerInfo.packageName != packageName) {
-            Log.d(TAG, "Blocked external controller ${controllerInfo.packageName}")
-            return null
-        }
+        // custom mode では mediaSession が null のため、system / Wear OS / Bluetooth を含め
+        // どの controller にも再生セッションを公開しない。
         return mediaSession
     }
 
@@ -110,17 +114,17 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         saveCurrentPosition()
+        notificationTickerJob?.cancel()
+        notificationTickerJob = null
         serviceScope.cancel()
         unregisterReceivers()
         abandonAudioFocus()
         try { loudnessEnhancer?.release() } catch (_: Exception) {}
         loudnessEnhancer = null
-        mediaSession?.run {
-            player.release()
-            release()
-        }
+        try { mediaSession?.release() } catch (_: Exception) {}
         mediaSession = null
         playerWrapper = null
+        try { exoPlayer?.release() } catch (_: Exception) {}
         exoPlayer = null
         super.onDestroy()
     }
@@ -169,14 +173,43 @@ class PlaybackService : MediaSessionService() {
             }
             ControlReceiver.CMD_SEEK -> {
                 val pos = intent.getLongExtra(ControlReceiver.EXTRA_SEEK_TO, -1L)
-                if (pos >= 0) exoPlayer?.seekTo(pos)
+                if (pos >= 0) {
+                    exoPlayer?.seekTo(pos)
+                    refreshMediaPresentation()
+                }
             }
             ControlReceiver.CMD_SPEED -> {
                 val speed = intent.getFloatExtra(ControlReceiver.EXTRA_SPEED, 1.0f)
                 exoPlayer?.setPlaybackSpeed(speed.coerceIn(0.5f, 2.0f))
+                refreshMediaPresentation()
             }
             CMD_APP_VOLUME -> applyVolume(intent.getFloatExtra(EXTRA_APP_VOLUME, 1.0f))
+            CMD_CUSTOM_MODE -> applyCustomMediaPlaybackMode(
+                intent.getBooleanExtra(EXTRA_CUSTOM_MODE, PreferencesManager.isUseCustomMediaPlayback(this))
+            )
         }
+    }
+
+    private fun applyCustomMediaPlaybackMode(enabled: Boolean) {
+        if (enabled) {
+            // MediaSession が存在するだけで Android framework / AVRCP / Wear OS へ
+            // 再生情報が広告され得るため、custom mode では完全に release する。
+            try { mediaSession?.release() } catch (e: Exception) {
+                Log.w(TAG, "Failed to release MediaSession for private mode: ${e.message}")
+            }
+            mediaSession = null
+            defaultNotificationProvider = null
+            lastNotificationLayout = null
+            lastNotificationActionFactory = null
+            notificationChangedCallback = null
+            // フォアグラウンド通知はMediaSessionとは別物なので、そのまま曲情報付きで維持する。
+            updateSilentNotification()
+        } else if (mediaSession == null) {
+            initMediaSession()
+            setupNotificationProvider()
+            refreshMediaPresentation()
+        }
+        sendPlaybackStateBroadcast()
     }
 
     private fun clearAutomaticPauseReasons() {
@@ -232,6 +265,15 @@ class PlaybackService : MediaSessionService() {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying) requestAudioFocus() else abandonAudioFocus()
                 refreshMediaPresentation()
+                updateNotificationTicker(isPlaying)
+            }
+
+            override fun onPositionDiscontinuity(
+                oldPosition: Player.PositionInfo,
+                newPosition: Player.PositionInfo,
+                reason: Int
+            ) {
+                refreshMediaPresentation()
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -284,6 +326,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun initMediaSession() {
+        if (PreferencesManager.isUseCustomMediaPlayback(this) || mediaSession != null) return
         val player = playerWrapper ?: return
         val sessionActivityPi = PendingIntent.getActivity(
             this,
@@ -329,11 +372,13 @@ class PlaybackService : MediaSessionService() {
                 lastNotificationLayout = customLayout
                 lastNotificationActionFactory = actionFactory
                 notificationChangedCallback = onNotificationChangedCallback
-                return if (PreferencesManager.isUseCustomMediaPlayback(this@PlaybackService)) {
+                val created = if (PreferencesManager.isUseCustomMediaPlayback(this@PlaybackService)) {
                     MediaNotification(FOREGROUND_NOTIFICATION_ID, buildSilentPlaybackNotification())
                 } else {
                     delegate.createNotification(mediaSession, customLayout, actionFactory, onNotificationChangedCallback)
                 }
+                applyRemainingTime(created.notification)
+                return created
             }
 
             override fun handleCustomCommand(
@@ -360,6 +405,7 @@ class PlaybackService : MediaSessionService() {
             }
             if (refreshed != null) {
                 try {
+                    applyRemainingTime(refreshed.notification)
                     callback.onNotificationChanged(refreshed)
                 } catch (e: Exception) {
                     Log.w(TAG, "Media3 notification callback refresh failed: ${e.message}")
@@ -367,18 +413,18 @@ class PlaybackService : MediaSessionService() {
             }
         }
         if (PreferencesManager.isUseCustomMediaPlayback(this)) updateSilentNotification()
+        sendPlaybackStateBroadcast()
     }
 
     private fun buildSilentPlaybackNotification(): Notification {
         val player = exoPlayer
         val metadata = player?.currentMediaItem?.mediaMetadata
         val title = metadata?.title?.toString().orEmpty().ifBlank { "Unknown" }
-        val artist = metadata?.artist?.toString().orEmpty()
         val idx = player?.currentMediaItemIndex ?: 0
         val total = playlist.size
         val indexText = if (total > 0) "[${idx + 1}/$total]" else ""
         val isPlaying = player?.isPlaying == true
-        val statusText = if (isPlaying) "再生中" else "一時停止中"
+        val remainingText = buildRemainingTimeText()
         val tapIntent = PendingIntent.getActivity(
             this,
             0,
@@ -399,7 +445,7 @@ class PlaybackService : MediaSessionService() {
         val builder = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("$indexText $title".trim())
-            .setContentText(if (artist.isBlank()) statusText else "$artist ・ $statusText")
+            .setContentText(remainingText)
             .setContentIntent(tapIntent)
             .addAction(0, "前へ", buildActionIntent(ControlReceiver.CMD_PREVIOUS))
             .addAction(0, if (isPlaying) "一時停止" else "再生", buildActionIntent(if (isPlaying) ControlReceiver.CMD_PAUSE else ControlReceiver.CMD_PLAY))
@@ -410,6 +456,63 @@ class PlaybackService : MediaSessionService() {
             .setSilent(true)
         loadArtworkBitmap(metadata?.artworkUri)?.let(builder::setLargeIcon)
         return builder.build()
+    }
+
+    private fun updateNotificationTicker(isPlaying: Boolean) {
+        notificationTickerJob?.cancel()
+        notificationTickerJob = null
+        if (!isPlaying) return
+        notificationTickerJob = serviceScope.launch {
+            while (isActive && exoPlayer?.isPlaying == true) {
+                delay(NOTIFICATION_REMAINING_UPDATE_INTERVAL_MS)
+                refreshMediaPresentation()
+            }
+        }
+    }
+
+    private fun calculateRemainingTimesMs(): Pair<Long, Long> {
+        val player = exoPlayer ?: return 0L to 0L
+        if (player.mediaItemCount <= 0) return 0L to 0L
+
+        val index = player.currentMediaItemIndex.coerceAtLeast(0)
+        val currentDurationMs = player.duration.takeIf { it > 0L }
+            ?: playlist.getOrNull(index)?.durationMs?.takeIf { it > 0L }
+            ?: 0L
+        val currentPositionMs = player.currentPosition.coerceAtLeast(0L)
+        val currentRemainingMediaMs = (currentDurationMs - currentPositionMs).coerceAtLeast(0L)
+        val followingMediaMs = if (index + 1 < playlist.size) {
+            playlist.subList(index + 1, playlist.size).sumOf { it.durationMs.coerceAtLeast(0L) }
+        } else {
+            0L
+        }
+
+        val speed = player.playbackParameters.speed.takeIf { it > 0f } ?: 1f
+        val fileRemainingMs = (currentRemainingMediaMs / speed).toLong().coerceAtLeast(0L)
+        val folderRemainingMs = ((currentRemainingMediaMs + followingMediaMs) / speed)
+            .toLong()
+            .coerceAtLeast(0L)
+        return fileRemainingMs to folderRemainingMs
+    }
+
+    private fun buildRemainingTimeText(): String {
+        val (fileRemainingMs, folderRemainingMs) = calculateRemainingTimesMs()
+        return "残り: ${formatRemainingClock(fileRemainingMs)}・${formatRemainingClock(folderRemainingMs)}"
+    }
+
+    private fun formatRemainingClock(ms: Long): String {
+        val totalSeconds = ((ms.coerceAtLeast(0L) + 999L) / 1000L)
+        val hours = totalSeconds / 3600L
+        val minutes = (totalSeconds % 3600L) / 60L
+        val seconds = totalSeconds % 60L
+        return if (hours > 0L) {
+            "$hours:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
+        } else {
+            "${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
+        }
+    }
+
+    private fun applyRemainingTime(notification: Notification) {
+        notification.extras.putCharSequence(Notification.EXTRA_TEXT, buildRemainingTimeText())
     }
 
     private fun loadArtworkBitmap(uri: Uri?): Bitmap? {
@@ -675,6 +778,30 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
+    private fun startStateBroadcastLoop() {
+        serviceScope.launch {
+            while (isActive) {
+                delay(STATE_BROADCAST_INTERVAL_MS)
+                if (PreferencesManager.isUseCustomMediaPlayback(this@PlaybackService)) {
+                    sendPlaybackStateBroadcast()
+                }
+            }
+        }
+    }
+
+    private fun sendPlaybackStateBroadcast() {
+        val player = exoPlayer ?: return
+        val index = player.currentMediaItemIndex
+        sendBroadcast(Intent(ACTION_PLAYBACK_STATE).setPackage(packageName).apply {
+            putExtra(EXTRA_STATE_INDEX, index)
+            putExtra(EXTRA_STATE_IS_PLAYING, player.isPlaying)
+            putExtra(EXTRA_STATE_POSITION_MS, player.currentPosition.coerceAtLeast(0L))
+            putExtra(EXTRA_STATE_DURATION_MS, player.duration.takeIf { it > 0 } ?: 0L)
+            putExtra(EXTRA_STATE_SPEED, player.playbackParameters.speed)
+            putExtra(EXTRA_STATE_HAS_MEDIA, player.mediaItemCount > 0)
+        })
+    }
+
     private fun saveCurrentPosition() {
         val player = exoPlayer ?: return
         if (player.currentPosition > 0) {
@@ -757,21 +884,30 @@ class PlaybackService : MediaSessionService() {
 
     private fun applyVolume(volume: Float) {
         val player = exoPlayer ?: return
-        val clamped = if (volume.isFinite()) volume.coerceIn(0.0f, PreferencesManager.MAX_APP_PLAYBACK_VOLUME) else 1.0f
+        val clamped = if (volume.isFinite()) {
+            volume.coerceIn(0.0f, PreferencesManager.MAX_APP_PLAYBACK_VOLUME)
+        } else 1.0f
+
+        // ExoPlayerには常に0〜1だけを渡し、100%超の増幅はLoudnessEnhancer側へ分離する。
         try {
             player.volume = clamped.coerceAtMost(1.0f)
         } catch (e: Exception) {
             Log.e(TAG, "Base volume failed", e)
             try { player.volume = 1.0f } catch (_: Exception) {}
         }
+
         val enhancer = loudnessEnhancer ?: return
         try {
+            // 5.0x = 約 +13.98 dB。mBへ変換し、要求上限(+14dB)を超えないよう制限する。
             val gainMb = if (clamped > 1.0f) {
-                (20.0 * log10(clamped.toDouble()) * 100.0).toInt().coerceIn(0, MAX_LOUDNESS_GAIN_MB)
+                (20.0 * log10(clamped.toDouble()) * 100.0)
+                    .toInt()
+                    .coerceIn(0, MAX_LOUDNESS_GAIN_MB)
             } else 0
             enhancer.setTargetGain(gainMb)
             if (!enhancer.enabled) enhancer.enabled = true
         } catch (e: Exception) {
+            // 端末固有のAudioEffect制限に当たってもクラッシュさせず、増幅なしへ戻す。
             Log.w(TAG, "Loudness gain failed: ${e.message}")
             try { enhancer.setTargetGain(0) } catch (_: Exception) {}
         }
@@ -779,7 +915,6 @@ class PlaybackService : MediaSessionService() {
 
     private fun buildMediaMetadata(track: Track): MediaMetadata = MediaMetadata.Builder()
         .setTitle(track.name)
-        .setArtist(track.artist ?: "Unknown Artist")
         .setAlbumTitle(track.album ?: "Unknown Album")
         .setArtworkUri(track.artworkUri)
         .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
@@ -823,11 +958,22 @@ class PlaybackService : MediaSessionService() {
         const val NOTIFICATION_CHANNEL_ID = "intentplayer_playback"
         const val NOTIFICATION_CHANNEL_ID_IDLE = "intentplayer_idle"
         const val FOREGROUND_NOTIFICATION_ID = 1001
+        const val ACTION_PLAYBACK_STATE = "com.intentplayer.PLAYBACK_STATE_INTERNAL"
+        const val EXTRA_STATE_INDEX = "stateIndex"
+        const val EXTRA_STATE_IS_PLAYING = "stateIsPlaying"
+        const val EXTRA_STATE_POSITION_MS = "statePositionMs"
+        const val EXTRA_STATE_DURATION_MS = "stateDurationMs"
+        const val EXTRA_STATE_SPEED = "stateSpeed"
+        const val EXTRA_STATE_HAS_MEDIA = "stateHasMedia"
+        const val CMD_CUSTOM_MODE = "custom_mode"
+        const val EXTRA_CUSTOM_MODE = "customMode"
         private const val CMD_APP_VOLUME = "app_volume"
         private const val EXTRA_APP_VOLUME = "volume"
         private const val POSITION_SAVE_INTERVAL_MS = 5_000L
+        private const val STATE_BROADCAST_INTERVAL_MS = 500L
+        private const val NOTIFICATION_REMAINING_UPDATE_INTERVAL_MS = 1_000L
         private const val MUTE_MONITOR_INTERVAL_MS = 500L
         private const val MAX_CONSECUTIVE_ERRORS = 3
-        private const val MAX_LOUDNESS_GAIN_MB = 600
+        private const val MAX_LOUDNESS_GAIN_MB = 1_400
     }
 }

@@ -1,8 +1,11 @@
 package com.intentplayer.ui
 
 import android.app.Application
+import android.content.BroadcastReceiver
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.Uri
 import android.os.Build
 import android.util.Log
@@ -69,6 +72,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private var positionPollingJob: Job? = null
 
+    private val playbackStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(receiverContext: Context, intent: Intent) {
+            if (intent.action != PlaybackService.ACTION_PLAYBACK_STATE) return
+            val hasMedia = intent.getBooleanExtra(PlaybackService.EXTRA_STATE_HAS_MEDIA, false)
+            val index = intent.getIntExtra(PlaybackService.EXTRA_STATE_INDEX, -1)
+            isPlaying.value = intent.getBooleanExtra(PlaybackService.EXTRA_STATE_IS_PLAYING, false)
+            currentPositionMs.value = intent.getLongExtra(PlaybackService.EXTRA_STATE_POSITION_MS, 0L)
+            durationMs.value = intent.getLongExtra(PlaybackService.EXTRA_STATE_DURATION_MS, 0L)
+            playbackSpeed.value = intent.getFloatExtra(PlaybackService.EXTRA_STATE_SPEED, 1.0f)
+            currentTrack.value = if (hasMedia) tracks.value.getOrNull(index) else null
+        }
+    }
+
     init {
         silentNotificationEnabled.value = PreferencesManager.isSilentNotificationEnabled(context)
         autoBluetoothControlEnabled.value = PreferencesManager.isAutoBluetoothControlEnabled(context)
@@ -102,7 +118,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             scanFolder(savedUri)
         }
 
-        initMediaController()
+        val stateFilter = IntentFilter(PlaybackService.ACTION_PLAYBACK_STATE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(playbackStateReceiver, stateFilter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            context.registerReceiver(playbackStateReceiver, stateFilter)
+        }
+
+        if (!useCustomMediaPlayback.value) initMediaController()
         startPositionPolling()
     }
 
@@ -163,6 +186,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setUseCustomMediaPlayback(enabled: Boolean) {
         PreferencesManager.setUseCustomMediaPlayback(context, enabled)
         useCustomMediaPlayback.value = enabled
+        sendServiceCommand(PlaybackService.CMD_CUSTOM_MODE) {
+            putExtra(PlaybackService.EXTRA_CUSTOM_MODE, enabled)
+        }
+        if (enabled) {
+            releaseMediaController()
+        } else {
+            viewModelScope.launch {
+                delay(300L)
+                initMediaController()
+            }
+        }
     }
 
     fun setEnableAppVolume(enabled: Boolean) {
@@ -202,6 +236,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun initMediaController() {
+        if (useCustomMediaPlayback.value) return
         val sessionToken = SessionToken(context, ComponentName(context, PlaybackService::class.java))
         controllerFuture?.let { MediaController.releaseFuture(it) }
         controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
@@ -287,7 +322,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     if (!c.isConnected) {
                         controller = null
-                        initMediaController()
+                        if (!useCustomMediaPlayback.value) initMediaController()
                     }
                 }
                 delay(500)
@@ -352,7 +387,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 context.startService(intent)
             }
-            if (controller == null || controller?.isConnected != true) {
+            if (useCustomMediaPlayback.value) {
+                currentTrack.value = tracks.value.getOrNull(index)
+            } else if (controller == null || controller?.isConnected != true) {
                 viewModelScope.launch {
                     delay(500L)
                     if (controller == null || controller?.isConnected != true) {
@@ -366,28 +403,74 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun pause() { controller?.pause() }
-    fun resume() { controller?.play() }
+    fun pause() {
+        if (useCustomMediaPlayback.value) sendServiceCommand(ControlReceiver.CMD_PAUSE)
+        else controller?.pause()
+    }
+
+    fun resume() {
+        if (useCustomMediaPlayback.value) sendServiceCommand(ControlReceiver.CMD_PLAY)
+        else controller?.play()
+    }
 
     fun stop() {
-        controller?.stop()
+        if (useCustomMediaPlayback.value) sendServiceCommand(ControlReceiver.CMD_STOP)
+        else controller?.stop()
         currentTrack.value = null
         currentPositionMs.value = 0L
         durationMs.value = 0L
     }
 
-    fun next() { controller?.seekToNextMediaItem() }
-    fun previous() { controller?.seekToPreviousMediaItem() }
+    fun next() {
+        if (useCustomMediaPlayback.value) sendServiceCommand(ControlReceiver.CMD_NEXT)
+        else controller?.seekToNextMediaItem()
+    }
+
+    fun previous() {
+        if (useCustomMediaPlayback.value) sendServiceCommand(ControlReceiver.CMD_PREVIOUS)
+        else controller?.seekToPreviousMediaItem()
+    }
 
     fun seekTo(positionMs: Long) {
-        controller?.seekTo(positionMs)
+        if (useCustomMediaPlayback.value) {
+            sendServiceCommand(ControlReceiver.CMD_SEEK) {
+                putExtra(ControlReceiver.EXTRA_SEEK_TO, positionMs)
+            }
+        } else controller?.seekTo(positionMs)
         currentPositionMs.value = positionMs
     }
 
     fun setPlaybackSpeed(speed: Float) {
         val safe = speed.coerceIn(0.5f, 2.0f)
-        controller?.setPlaybackSpeed(safe)
+        if (useCustomMediaPlayback.value) {
+            sendServiceCommand(ControlReceiver.CMD_SPEED) {
+                putExtra(ControlReceiver.EXTRA_SPEED, safe)
+            }
+        } else controller?.setPlaybackSpeed(safe)
         playbackSpeed.value = safe
+    }
+
+    private fun sendServiceCommand(command: String, extras: Intent.() -> Unit = {}) {
+        val intent = Intent(context, PlaybackService::class.java).apply {
+            putExtra(ControlReceiver.EXTRA_COMMAND, command)
+            extras()
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && command == ControlReceiver.CMD_PLAY) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Service command failed: $command: ${e.message}")
+        }
+    }
+
+    private fun releaseMediaController() {
+        controller = null
+        controllerFuture?.let { MediaController.releaseFuture(it) }
+        controllerFuture = null
+        controllerRetryCount = 0
     }
 
     fun clearUiMessage() {
@@ -397,6 +480,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     override fun onCleared() {
         super.onCleared()
         positionPollingJob?.cancel()
+        try { context.unregisterReceiver(playbackStateReceiver) } catch (_: Exception) {}
         controllerFuture?.let { MediaController.releaseFuture(it) }
     }
 

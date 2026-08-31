@@ -1,164 +1,45 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-
-    <!--
-        Phase 12: OS統合・メディア通知・OEM統合 完全修正版
-
-        変更一覧:
-        [Fix-M1] BLUETOOTH (maxSdkVersion=30) 追加 → Android 11以下でのBT接続受信
-        [Fix-M2] SCHEDULE_EXACT_ALARM 追加 → Doze中のAlarm実行に必要
-        [Fix-M3] MainActivity に APP_MUSIC / MUSIC_PLAYER intent-filter 追加
-                 → OSが「音楽アプリ」として認識 (BT接続時に候補表示)
-        [Fix-M4] BootReceiver: LOCKED_BOOT_COMPLETED 追加 (Android 12+の暗号化ブート対応)
-        [Fix-M5] MediaButtonReceiver → IntentPlayerMediaButtonReceiver に変更
-                 → BackgroundServiceStartNotAllowedException を安全にハンドリング
-        [Fix-M6] MediaButtonReceiver の priority="1000" 設定
-    -->
-
-    <!-- ストレージ権限 -->
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
-    <uses-permission
-        android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32" />
-
-    <!-- Foreground Service 権限 -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-
-    <!-- 通知権限 (Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-
-    <!-- ブート完了時の起動 -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-
-    <!-- バッテリー最適化除外 -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-
-    <!-- WakeLock: 画面OFF時の再生継続に必要 -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-
-    <!-- [Fix-M2] 正確なAlarm: Doze中のタイムアウト処理に使用 -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" android:minSdkVersion="31" />
 
-    <!--
-        Bluetooth権限:
-        [Fix-M1] BLUETOOTH (maxSdkVersion=30): Android 11以下でのBT接続状態変化受信に必要
-        BLUETOOTH_CONNECT (minSdkVersion=31): Android 12+でのBTデバイス名取得・接続状態受信に必要
-    -->
-    <uses-permission
-        android:name="android.permission.BLUETOOTH"
-        android:maxSdkVersion="30" />
-    <uses-permission
-        android:name="android.permission.BLUETOOTH_CONNECT"
-        android:minSdkVersion="31" />
-
-    <application
-        android:allowBackup="true"
-        android:icon="@mipmap/ic_launcher"
-        android:label="@string/app_name"
-        android:roundIcon="@mipmap/ic_launcher_round"
-        android:supportsRtl="true"
-        android:theme="@style/Theme.IntentPlayer">
-
-        <!--
-            [Fix-M3] MainActivity: 音楽アプリとして OS に登録する。
-
-            android.intent.category.APP_MUSIC:
-              → Android が「デフォルト音楽プレイヤー」として認識する。
-              → Bluetooth接続時に「どのアプリで音楽を再生するか」の候補に表示される。
-              → Samsung/Pixel の Media Router が音楽アプリとして優先表示する。
-
-            android.intent.action.MUSIC_PLAYER:
-              → Xiaomi MIUI / OPPO ColorOS が「音楽プレイヤー」として認識するために必要。
-              → これがないと MIUI の「音楽アプリ」設定に表示されない。
-
-            launchMode="singleTop":
-              → 通知タップ時に Activity を重複起動しない。
-              → Android 14 のロック画面通知タップで必須。
-        -->
-        <activity
-            android:name=".MainActivity"
-            android:exported="true"
-            android:label="@string/app_name"
-            android:launchMode="singleTop"
-            android:theme="@style/Theme.IntentPlayer"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard|navigation|uiMode|fontScale|locale|mnc|mcc|density">
-            <!-- ランチャー + APP_MUSICカテゴリ -->
+    <application android:allowBackup="true" android:icon="@mipmap/ic_launcher" android:label="@string/app_name" android:roundIcon="@mipmap/ic_launcher_round" android:supportsRtl="true" android:theme="@style/Theme.IntentPlayer">
+        <activity android:name=".MainActivity" android:exported="true" android:label="@string/app_name" android:launchMode="singleTop" android:theme="@style/Theme.IntentPlayer" android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard|navigation|uiMode|fontScale|locale|mnc|mcc|density">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
                 <category android:name="android.intent.category.APP_MUSIC" />
             </intent-filter>
-            <!-- 音楽プレイヤーとして認識させる (MIUI/ColorOS向け) -->
             <intent-filter>
                 <action android:name="android.intent.action.MUSIC_PLAYER" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
-
-        <!--
-            PlaybackService: MediaSessionService として登録。
-
-            foregroundServiceType="mediaPlayback":
-              → Android 10+ で必須。
-              → Android 14 では MissingForegroundServiceTypeException を防ぐために必須。
-
-            exported="true":
-              → Bluetooth デバイス / Android Auto / メディアコントローラーからのバインドを許可。
-              → これがないと外部メディアコントローラーが接続できない。
-
-            android.media.browse.MediaBrowserService:
-              → 古い MediaBrowserService API との互換性のためのフィルタ。
-              → Android Auto / Wear OS との接続に必要。
-        -->
-        <service
-            android:name=".service.PlaybackService"
-            android:exported="true"
-            android:foregroundServiceType="mediaPlayback">
+        <service android:name=".service.PlaybackService" android:exported="true" android:foregroundServiceType="mediaPlayback">
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaSessionService" />
                 <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
-
-        <!--
-            ControlReceiver: MacroDroid / ADB からの操作コマンドを受信する。
-            exported="true": 外部アプリ (MacroDroid) からのブロードキャストを受信するために必要。
-        -->
-        <receiver
-            android:name=".receiver.ControlReceiver"
-            android:exported="true"
-            android:enabled="true">
-            <intent-filter>
-                <action android:name="com.intentplayer.CONTROL" />
-            </intent-filter>
+        <receiver android:name=".receiver.ControlReceiver" android:exported="true" android:enabled="true">
+            <intent-filter><action android:name="com.intentplayer.CONTROL" /></intent-filter>
         </receiver>
-
-        <!--
-            BootReceiver: 端末起動時・アプリ更新時に再生を再開する。
-
-            exported="true":
-              → BOOT_COMPLETED / LOCKED_BOOT_COMPLETED は OS から送信される。
-              → Android 8.0+ では exported="true" が必須（OS ブロードキャストを受信するため）。
-
-            [Fix-M4] LOCKED_BOOT_COMPLETED:
-              → Android 7.0 (API 24) で追加。Direct Boot 対応。
-              → ユーザーがロックを解除する前 (暗号化ストレージが未ロック) の段階で発火。
-              → ただし SharedPreferences は暗号化ストレージにあるため、
-                 LOCKED_BOOT_COMPLETED では PreferencesManager.loadFolderUri() が null を返す。
-                 → 通知チャンネルの事前作成のみ行い、再生は BOOT_COMPLETED で行う。
-        -->
-        <receiver
-            android:name=".receiver.BootReceiver"
-            android:exported="true"
-            android:enabled="true">
+        <receiver android:name=".receiver.BootReceiver" android:exported="true" android:enabled="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
-
     </application>
-
 </manifest>
