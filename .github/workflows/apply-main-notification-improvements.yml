@@ -1,0 +1,180 @@
+name: Apply Main And Notification Improvements
+
+on:
+  push:
+    branches:
+      - hide-external-media-session
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hide-external-media-session
+          fetch-depth: 0
+      - name: Apply requested changes
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              if old not in text:
+                  raise SystemExit(f"missing target: {label}")
+              return text.replace(old, new, 1)
+
+          # Main screen terminology.
+          p = Path('app/src/main/java/com/intentplayer/ui/MainScreen.kt')
+          s = p.read_text()
+          s = s.replace('Text("アプリ独自の音量", style = MaterialTheme.typography.bodySmall)', 'Text("音量", style = MaterialTheme.typography.bodySmall)')
+          s = s.replace('Text("曲一覧", style = MaterialTheme.typography.titleSmall)', 'Text("再生ファイル一覧", style = MaterialTheme.typography.titleSmall)')
+          s = s.replace('Text("${tracks.size}曲", style = MaterialTheme.typography.bodySmall)', 'Text("${tracks.size}ファイル", style = MaterialTheme.typography.bodySmall)')
+          p.write_text(s)
+
+          # Settings terminology: these are files, not songs.
+          p = Path('app/src/main/java/com/intentplayer/ui/SettingsScreen.kt')
+          s = p.read_text()
+          s = s.replace('title = "アプリの音量をさらに大きくする"', 'title = "音量"')
+          s = s.replace('再生中の曲情報', '再生中のファイル情報')
+          s = s.replace('対象の曲名', '対象のファイル名')
+          p.write_text(s)
+
+          # Playback notification remaining-time updates.
+          p = Path('app/src/main/java/com/intentplayer/service/PlaybackService.kt')
+          s = p.read_text()
+          s = replace_once(
+              s,
+              '    private var notificationChangedCallback: MediaNotification.Provider.Callback? = null\n',
+              '    private var notificationChangedCallback: MediaNotification.Provider.Callback? = null\n    private var notificationTickerJob: Job? = null\n',
+              'ticker field'
+          )
+          s = replace_once(
+              s,
+              '            override fun onIsPlayingChanged(isPlaying: Boolean) {\n                if (isPlaying) requestAudioFocus() else abandonAudioFocus()\n                refreshMediaPresentation()\n            }',
+              '            override fun onIsPlayingChanged(isPlaying: Boolean) {\n                if (isPlaying) requestAudioFocus() else abandonAudioFocus()\n                refreshMediaPresentation()\n                updateNotificationTicker(isPlaying)\n            }\n\n            override fun onPositionDiscontinuity(\n                oldPosition: Player.PositionInfo,\n                newPosition: Player.PositionInfo,\n                reason: Int\n            ) {\n                refreshMediaPresentation()\n            }',
+              'player callbacks'
+          )
+          s = replace_once(
+              s,
+              '            ControlReceiver.CMD_SEEK -> {\n                val pos = intent.getLongExtra(ControlReceiver.EXTRA_SEEK_TO, -1L)\n                if (pos >= 0) exoPlayer?.seekTo(pos)\n            }',
+              '            ControlReceiver.CMD_SEEK -> {\n                val pos = intent.getLongExtra(ControlReceiver.EXTRA_SEEK_TO, -1L)\n                if (pos >= 0) {\n                    exoPlayer?.seekTo(pos)\n                    refreshMediaPresentation()\n                }\n            }',
+              'seek refresh'
+          )
+          s = replace_once(
+              s,
+              '            ControlReceiver.CMD_SPEED -> {\n                val speed = intent.getFloatExtra(ControlReceiver.EXTRA_SPEED, 1.0f)\n                exoPlayer?.setPlaybackSpeed(speed.coerceIn(0.5f, 2.0f))\n            }',
+              '            ControlReceiver.CMD_SPEED -> {\n                val speed = intent.getFloatExtra(ControlReceiver.EXTRA_SPEED, 1.0f)\n                exoPlayer?.setPlaybackSpeed(speed.coerceIn(0.5f, 2.0f))\n                refreshMediaPresentation()\n            }',
+              'speed refresh'
+          )
+          old_refresh = '''            if (refreshed != null) {
+                try {
+                    callback.onNotificationChanged(refreshed)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Media3 notification callback refresh failed: ${e.message}")
+                }
+            }'''
+          new_refresh = '''            if (refreshed != null) {
+                try {
+                    applyRemainingTimeExtras(refreshed.notification)
+                    callback.onNotificationChanged(refreshed)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Media3 notification callback refresh failed: ${e.message}")
+                }
+            }'''
+          s = replace_once(s, old_refresh, new_refresh, 'normal notification remaining time')
+
+          old_builder = '''        val isPlaying = player?.isPlaying == true
+        val statusText = if (isPlaying) "再生中" else "一時停止中"'''
+          new_builder = '''        val isPlaying = player?.isPlaying == true
+        val (fileRemainingMs, folderRemainingMs) = calculateRemainingTimesMs()
+        val fileRemainingText = "ファイル: ${formatRemainingTime(fileRemainingMs)}"
+        val folderRemainingText = "フォルダ全体: ${formatRemainingTime(folderRemainingMs)}"'''
+          s = replace_once(s, old_builder, new_builder, 'custom notification remaining text')
+          s = replace_once(
+              s,
+              '            .setContentText(statusText)\n            .setContentIntent(tapIntent)',
+              '            .setContentText(fileRemainingText)\n            .setSubText(folderRemainingText)\n            .setStyle(NotificationCompat.BigTextStyle().bigText("$fileRemainingText\\n$folderRemainingText"))\n            .setContentIntent(tapIntent)',
+              'custom notification layout'
+          )
+
+          marker = '    private fun loadArtworkBitmap(uri: Uri?): Bitmap? {'
+          helpers = r'''    private fun updateNotificationTicker(isPlaying: Boolean) {
+        notificationTickerJob?.cancel()
+        notificationTickerJob = null
+        if (!isPlaying) return
+        notificationTickerJob = serviceScope.launch {
+            while (isActive && exoPlayer?.isPlaying == true) {
+                delay(NOTIFICATION_REMAINING_UPDATE_INTERVAL_MS)
+                refreshMediaPresentation()
+            }
+        }
+    }
+
+    private fun calculateRemainingTimesMs(): Pair<Long, Long> {
+        val player = exoPlayer ?: return 0L to 0L
+        if (player.mediaItemCount <= 0) return 0L to 0L
+        val index = player.currentMediaItemIndex.coerceAtLeast(0)
+        val currentDuration = player.duration.takeIf { it > 0L }
+            ?: playlist.getOrNull(index)?.durationMs?.takeIf { it > 0L }
+            ?: 0L
+        val currentPosition = player.currentPosition.coerceAtLeast(0L)
+        val currentRemaining = (currentDuration - currentPosition).coerceAtLeast(0L)
+        val followingDuration = if (index + 1 < playlist.size) {
+            playlist.subList(index + 1, playlist.size).sumOf { it.durationMs.coerceAtLeast(0L) }
+        } else 0L
+        val speed = player.playbackParameters.speed.takeIf { it > 0f } ?: 1f
+        val fileWallClock = (currentRemaining / speed).toLong().coerceAtLeast(0L)
+        val folderWallClock = ((currentRemaining + followingDuration) / speed).toLong().coerceAtLeast(0L)
+        return fileWallClock to folderWallClock
+    }
+
+    private fun formatRemainingTime(ms: Long): String {
+        val totalSeconds = ((ms.coerceAtLeast(0L) + 999L) / 1000L)
+        val hours = totalSeconds / 3600L
+        val minutes = (totalSeconds % 3600L) / 60L
+        val seconds = totalSeconds % 60L
+        return when {
+            hours > 0L -> "あと${hours}時間${minutes}分${seconds}秒"
+            minutes > 0L -> "あと${minutes}分${seconds}秒"
+            else -> "あと${seconds}秒"
+        }
+    }
+
+    private fun applyRemainingTimeExtras(notification: Notification) {
+        val (fileRemainingMs, folderRemainingMs) = calculateRemainingTimesMs()
+        val fileText = "ファイル: ${formatRemainingTime(fileRemainingMs)}"
+        val folderText = "フォルダ全体: ${formatRemainingTime(folderRemainingMs)}"
+        notification.extras.putCharSequence(Notification.EXTRA_TEXT, fileText)
+        notification.extras.putCharSequence(Notification.EXTRA_SUB_TEXT, folderText)
+    }
+
+'''
+          if marker not in s:
+              raise SystemExit('missing target: helper insertion')
+          s = s.replace(marker, helpers + marker, 1)
+          s = replace_once(
+              s,
+              '        private const val STATE_BROADCAST_INTERVAL_MS = 500L\n',
+              '        private const val STATE_BROADCAST_INTERVAL_MS = 500L\n        private const val NOTIFICATION_REMAINING_UPDATE_INTERVAL_MS = 1_000L\n',
+              'notification interval constant'
+          )
+          p.write_text(s)
+          PY
+      - name: Verify no song terminology remains in user-facing Kotlin text
+        run: |
+          ! grep -RIn --include='*.kt' -E '曲一覧|[0-9}]曲|曲情報|曲名|アプリ独自の音量' app/src/main/java
+      - name: Build debug APK
+        run: gradle assembleDebug
+      - name: Commit patch and remove one-shot workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/apply-main-notification-improvements.yml
+          git add app/src/main/java/com/intentplayer/ui/MainScreen.kt app/src/main/java/com/intentplayer/ui/SettingsScreen.kt app/src/main/java/com/intentplayer/service/PlaybackService.kt
+          git commit -m 'feat: show remaining playback time and unify file terminology'
+          git push origin HEAD:hide-external-media-session
