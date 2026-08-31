@@ -59,8 +59,15 @@ fun SettingsScreen(viewModel: MainViewModel) {
 
     val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
-            try { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {}
-            context.getSharedPreferences("intent_player_prefs", Context.MODE_PRIVATE).edit().putString("default_folder_uri", uri.toString()).apply()
+            val persisted = runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                true
+            }.getOrDefault(false)
+            if (!persisted) {
+                Toast.makeText(context, "このフォルダの永続アクセス権を保存できませんでした", Toast.LENGTH_LONG).show()
+            }
+            context.getSharedPreferences("intent_player_prefs", Context.MODE_PRIVATE)
+                .edit().putString("default_folder_uri", uri.toString()).apply()
             defaultFolder = uri
         }
     }
@@ -68,7 +75,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) {
             runCatching {
-                context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use {
+                context.contentResolver.openOutputStream(uri, "wt")?.bufferedWriter()?.use {
                     it.write(PreferencesManager.exportSettings(context))
                 } ?: error("保存先を開けませんでした")
             }.onSuccess {
@@ -82,8 +89,11 @@ fun SettingsScreen(viewModel: MainViewModel) {
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             runCatching {
-                val json = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                    ?: error("バックアップを開けませんでした")
+                val json = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { reader ->
+                    val text = reader.readText()
+                    require(text.length <= 256 * 1024) { "バックアップファイルが大きすぎます" }
+                    text
+                } ?: error("バックアップを開けませんでした")
                 PreferencesManager.importSettings(context, json)
                 applyImportedSettings(viewModel, context)
                 defaultFolder = loadDefaultFolder(context)
@@ -199,7 +209,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
             LinkRow(
                 Icons.Default.AdminPanelSettings,
                 "すべてのファイルへのアクセス",
-                if (allFilesAllowed()) "許可されています。端末内のファイルをスキャンできます。" else "未許可です。Androidの設定からIntentPlayerにすべてのファイルへのアクセスを許可してください。",
+                if (allFilesAllowed()) "許可されています。端末内のファイルをスキャンできます。" else "未許可です。Androidの設定からIntentPlayerにすべてのファイルへのアクセスを許可してください。SAFでもフォルダを選べます。",
                 if (allFilesAllowed()) "許可済み" else "設定"
             ) { openAllFilesSettings(context) }
             LinkRow(
@@ -209,7 +219,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
                 "選択"
             ) { folderPicker.launch(null) }
             Text(
-                "フォルダ画面で選んだフォルダが現在のキューになります。既定のフォルダは、フォルダ指定のないインテント再生に使用します。",
+                "フォルダ画面で選んだフォルダが現在のキューになります。既定のフォルダは、フォルダ指定のないインテント再生に使用します。SAFの既定フォルダは端末側の永続アクセス権が必要です。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(12.dp)
@@ -225,7 +235,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
             LinkRow(
                 Icons.Default.Download,
                 "設定をインポート",
-                "エクスポートしたIntentPlayerの設定ファイルを読み込みます。読み込み後は設定値をすぐに反映します。",
+                "エクスポートしたIntentPlayerの設定を検証して読み込みます。既定フォルダは、この端末でアクセス権が残っている場合だけ復元します。",
                 "読込"
             ) { importLauncher.launch(arrayOf("application/json", "text/plain")) }
 
@@ -338,14 +348,16 @@ private fun DurationPickerDialog(
                 Text("時　　分　　秒", style = MaterialTheme.typography.labelMedium)
                 AndroidView(
                     factory = { ctx ->
-                        val hour = NumberPicker(ctx).apply { minValue = 0; maxValue = 24 }
-                        val minute = NumberPicker(ctx).apply { minValue = 0; maxValue = 59 }
-                        val second = NumberPicker(ctx).apply { minValue = 0; maxValue = 59 }
+                        val hour = NumberPicker(ctx).apply { minValue = 0; maxValue = 24; wrapSelectorWheel = false }
+                        val minute = NumberPicker(ctx).apply { minValue = 0; maxValue = 59; wrapSelectorWheel = true }
+                        val second = NumberPicker(ctx).apply { minValue = 0; maxValue = 59; wrapSelectorWheel = true }
                         fun update() {
-                            var ms = (hour.value * 3600L + minute.value * 60L + second.value) * 1000L
-                            ms = ms.coerceIn(minMs, maxMs)
-                            selectedMs = ms
-                            if (hour.value == 24) { minute.value = 0; second.value = 0 }
+                            if (hour.value == 24) {
+                                minute.value = 0
+                                second.value = 0
+                            }
+                            selectedMs = ((hour.value * 3600L + minute.value * 60L + second.value) * 1000L)
+                                .coerceIn(minMs, maxMs)
                         }
                         val total = initialMs.coerceIn(minMs, maxMs) / 1000L
                         hour.value = (total / 3600L).toInt()
@@ -389,15 +401,17 @@ private fun MillisecondPickerDialog(
                 Text("秒　　 ミリ秒", style = MaterialTheme.typography.labelMedium)
                 AndroidView(
                     factory = { ctx ->
-                        val seconds = NumberPicker(ctx).apply { minValue = 0; maxValue = maxMs / 1000 }
+                        val seconds = NumberPicker(ctx).apply { minValue = 0; maxValue = maxMs / 1000; wrapSelectorWheel = false }
                         val millis = NumberPicker(ctx).apply {
                             minValue = 0
                             maxValue = 99
                             displayedValues = Array(100) { (it * 10).toString().padStart(3, '0') }
+                            wrapSelectorWheel = true
                         }
                         seconds.value = initialMs.coerceIn(0, maxMs) / 1000
                         millis.value = (initialMs.coerceIn(0, maxMs) % 1000) / 10
                         fun update() {
+                            if (seconds.value == maxMs / 1000 && maxMs % 1000 == 0) millis.value = 0
                             selected = (seconds.value * 1000 + millis.value * 10).coerceIn(0, maxMs)
                         }
                         seconds.setOnValueChangedListener { _, _, _ -> update() }
@@ -462,6 +476,7 @@ private fun applyImportedSettings(viewModel: MainViewModel, context: Context) {
     viewModel.setUseCustomMediaPlayback(PreferencesManager.isUseCustomMediaPlayback(context))
     viewModel.setEnableAppVolume(PreferencesManager.isEnableAppVolume(context))
     viewModel.setAppPlaybackVolume(PreferencesManager.getAppPlaybackVolume(context))
+    viewModel.setPlaybackSpeed(PreferencesManager.getPlaybackSpeed(context))
 }
 
 private fun loadDefaultFolder(context: Context): Uri? =
@@ -490,10 +505,12 @@ private fun openAllFilesSettings(context: Context) {
     try {
         context.startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:${context.packageName}")))
     } catch (_: Exception) {
-        context.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+        runCatching { context.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)) }
+            .onFailure { Toast.makeText(context, "設定画面を開けませんでした。SAFを利用してください。", Toast.LENGTH_LONG).show() }
     }
 }
 
 private fun openUrl(context: Context, url: String) {
-    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+        .onFailure { Toast.makeText(context, "リンクを開けませんでした", Toast.LENGTH_LONG).show() }
 }
