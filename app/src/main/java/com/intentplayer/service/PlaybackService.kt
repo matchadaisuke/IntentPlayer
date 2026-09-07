@@ -79,6 +79,7 @@ class PlaybackService : MediaSessionService() {
     private var lastNotificationActionFactory: MediaNotification.ActionFactory? = null
     private var notificationChangedCallback: MediaNotification.Provider.Callback? = null
     private var notificationTickerJob: Job? = null
+    private var stoppingPlayback = false
 
     override fun onCreate() {
         super.onCreate()
@@ -129,6 +130,7 @@ class PlaybackService : MediaSessionService() {
     private fun handleCommand(intent: Intent, command: String) {
         when (command) {
             ControlReceiver.CMD_PLAY, CMD_FORCE_PLAY -> {
+                stoppingPlayback = false
                 val folderUriStr = intent.getStringExtra(ControlReceiver.EXTRA_FOLDER_URI)
                 val folderUri = if (folderUriStr != null) {
                     try { Uri.parse(folderUriStr) } catch (_: Exception) { null }
@@ -416,6 +418,10 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun refreshMediaPresentation() {
+        if (stoppingPlayback) {
+            sendPlaybackStateBroadcast()
+            return
+        }
         val session = mediaSession
         val callback = notificationChangedCallback
         if (session != null && callback != null) {
@@ -551,6 +557,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun updateSilentNotification() {
+        if (stoppingPlayback) return
         try {
             getSystemService(NotificationManager::class.java)
                 .notify(FOREGROUND_NOTIFICATION_ID, buildSilentPlaybackNotification())
@@ -755,13 +762,21 @@ class PlaybackService : MediaSessionService() {
         if (!PreferencesManager.isAutoBluetoothControlEnabled(this)) return
         val player = exoPlayer ?: return
         saveCurrentPosition()
-        lastDisconnectTimeMs = System.currentTimeMillis()
-        pausedByDisconnect = player.isPlaying
-        if (pausedByDisconnect) player.pause()
+        if (player.isPlaying) {
+            lastDisconnectTimeMs = System.currentTimeMillis()
+            pausedByDisconnect = true
+            player.pause()
+        }
+        scheduleAutoResumeAfterRouteChange()
     }
 
     private fun onAudioDeviceReconnected() {
         if (!PreferencesManager.isAutoBluetoothControlEnabled(this)) return
+        if (!pausedByDisconnect) return
+        scheduleAutoResumeAfterRouteChange()
+    }
+
+    private fun scheduleAutoResumeAfterRouteChange() {
         val player = exoPlayer ?: return
         if (!pausedByDisconnect) return
         if (PreferencesManager.isAutoResumeTimeoutEnabled(this)) {
@@ -776,11 +791,16 @@ class PlaybackService : MediaSessionService() {
             val delayMs = PreferencesManager.getBluetoothReconnectDelayMs(this@PlaybackService)
             delay(delayMs.toLong())
             if (!isExternalAudioDeviceConnected()) {
-                pausedByDisconnect = false
                 return@launch
             }
+            if (PreferencesManager.isAutoResumeTimeoutEnabled(this@PlaybackService)) {
+                val timeout = PreferencesManager.getAutoResumeTimeoutMs(this@PlaybackService)
+                if (System.currentTimeMillis() - lastDisconnectTimeMs > timeout) {
+                    pausedByDisconnect = false
+                    return@launch
+                }
+            }
             if (!canStartPlayback()) {
-                pausedByDisconnect = false
                 return@launch
             }
             pausedByDisconnect = false
@@ -969,14 +989,25 @@ class PlaybackService : MediaSessionService() {
         .build()
 
     private fun stopPlayback() {
+        if (stoppingPlayback) return
+        stoppingPlayback = true
         clearAutomaticPauseReasons()
         abandonAudioFocus()
+        notificationTickerJob?.cancel()
+        notificationTickerJob = null
         exoPlayer?.stop()
         exoPlayer?.clearMediaItems()
         playlist = emptyList()
         currentFolderUri = null
         PreferencesManager.clearPlaybackState(this)
         sendPlaybackStateBroadcast()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
+        getSystemService(NotificationManager::class.java).cancel(FOREGROUND_NOTIFICATION_ID)
         stopSelf()
     }
 
