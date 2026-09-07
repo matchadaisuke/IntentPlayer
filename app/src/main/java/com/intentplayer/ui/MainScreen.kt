@@ -61,7 +61,10 @@ private fun PlayerTab(viewModel: MainViewModel, onBatteryOptimizationClick: () -
                 Spacer(Modifier.height(22.dp))
                 val artwork = track?.artworkUri
                 if (artwork != null) {
-                    AndroidView(factory={ context -> android.widget.ImageView(context).apply { scaleType=android.widget.ImageView.ScaleType.CENTER_CROP; setImageURI(artwork) } }, update={ it.setImageURI(artwork) }, modifier=Modifier.fillMaxWidth().heightIn(min=180.dp,max=300.dp))
+                    Box(Modifier.fillMaxWidth().heightIn(min=180.dp,max=300.dp), contentAlignment=Alignment.Center) {
+                        Surface(Modifier.fillMaxSize(),shape=MaterialTheme.shapes.extraLarge,color=MaterialTheme.colorScheme.secondaryContainer){Box(contentAlignment=Alignment.Center){Icon(Icons.Default.GraphicEq,"カバー画像なし",modifier=Modifier.size(88.dp),tint=MaterialTheme.colorScheme.onSecondaryContainer)}}
+                        AndroidView(factory={ context -> android.widget.ImageView(context).apply { scaleType=android.widget.ImageView.ScaleType.CENTER_CROP; setImageURI(artwork) } }, update={ it.setImageURI(artwork) }, modifier=Modifier.fillMaxSize())
+                    }
                     Spacer(Modifier.height(20.dp))
                 } else if (track != null) {
                     Surface(Modifier.size(190.dp),shape=MaterialTheme.shapes.extraLarge,color=MaterialTheme.colorScheme.secondaryContainer){Box(contentAlignment=Alignment.Center){Icon(Icons.Default.GraphicEq,"カバー画像なし",modifier=Modifier.size(88.dp),tint=MaterialTheme.colorScheme.onSecondaryContainer)}}
