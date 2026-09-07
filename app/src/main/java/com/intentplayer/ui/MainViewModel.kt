@@ -89,7 +89,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 currentTrack.value = tracks.value.getOrNull(index) ?: currentTrack.value
             } else {
                 currentTrack.value = null
-                tracks.value = emptyList()
             }
         }
     }
