@@ -762,7 +762,10 @@ class PlaybackService : MediaSessionService() {
         if (!PreferencesManager.isAutoBluetoothControlEnabled(this)) return
         val player = exoPlayer ?: return
         saveCurrentPosition()
-        if (player.isPlaying) {
+        // Route changes can make isPlaying false before the disconnect broadcast arrives.
+        // playWhenReady + a live queue preserves whether playback was actually requested,
+        // while still avoiding automatic resume after a manual pause.
+        if (isPlaybackRequested(player)) {
             lastDisconnectTimeMs = System.currentTimeMillis()
             pausedByDisconnect = true
             player.pause()

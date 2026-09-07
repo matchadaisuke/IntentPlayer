@@ -85,7 +85,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             playbackSpeed.value = PreferencesManager.normalizePlaybackSpeed(
                 intent.getFloatExtra(PlaybackService.EXTRA_STATE_SPEED, playbackSpeed.value)
             )
-            currentTrack.value = if (hasMedia) tracks.value.getOrNull(index) ?: currentTrack.value else null
+            if (hasMedia) {
+                currentTrack.value = tracks.value.getOrNull(index) ?: currentTrack.value
+            } else {
+                currentTrack.value = null
+                tracks.value = emptyList()
+            }
         }
     }
 

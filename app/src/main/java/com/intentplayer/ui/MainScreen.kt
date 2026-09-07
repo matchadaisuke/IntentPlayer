@@ -40,7 +40,7 @@ fun MainScreen(viewModel: MainViewModel, onSelectFolderClick: () -> Unit, onBatt
     val folderUri by viewModel.folderUri.collectAsState(); val currentTrack by viewModel.currentTrack.collectAsState()
     var tab by remember(screen) { mutableStateOf(if (screen == MainViewModel.AppScreen.SETTINGS) MainTab.SETTINGS else if (folderUri == null) MainTab.FOLDERS else if (currentTrack == null) MainTab.QUEUE else MainTab.PLAYER) }
     LaunchedEffect(playerTabRequest) { if (playerTabRequest > 0) tab = MainTab.PLAYER }
-    Scaffold(contentWindowInsets = WindowInsets(0,0,0,0), bottomBar = { NavigationBar(windowInsets = WindowInsets(0,0,0,0)) { NavItem(MainTab.PLAYER,tab,Icons.Default.PlayCircle,"再生"){tab=it}; NavItem(MainTab.QUEUE,tab,Icons.Default.QueueMusic,"キュー"){tab=it}; NavItem(MainTab.FOLDERS,tab,Icons.Default.Folder,"フォルダ"){tab=it}; NavItem(MainTab.SETTINGS,tab,Icons.Default.Settings,"設定"){tab=it} } }) { padding ->
+    Scaffold(contentWindowInsets = WindowInsets(0,0,0,0), bottomBar = { NavigationBar { NavItem(MainTab.PLAYER,tab,Icons.Default.PlayCircle,"再生"){tab=it}; NavItem(MainTab.QUEUE,tab,Icons.Default.QueueMusic,"キュー"){tab=it}; NavItem(MainTab.FOLDERS,tab,Icons.Default.Folder,"フォルダ"){tab=it}; NavItem(MainTab.SETTINGS,tab,Icons.Default.Settings,"設定"){tab=it} } }) { padding ->
         Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) { when(tab) { MainTab.PLAYER -> PlayerTab(viewModel,onBatteryOptimizationClick); MainTab.QUEUE -> QueueTab(viewModel); MainTab.FOLDERS -> FolderTab(viewModel,onSelectFolderClick){tab=MainTab.QUEUE}; MainTab.SETTINGS -> SettingsScreen(viewModel) } }
     }
 }
@@ -64,8 +64,8 @@ private fun PlayerTab(viewModel: MainViewModel, onBatteryOptimizationClick: () -
                     AndroidView(factory={ context -> android.widget.ImageView(context).apply { scaleType=android.widget.ImageView.ScaleType.CENTER_CROP; setImageURI(artwork) } }, update={ it.setImageURI(artwork) }, modifier=Modifier.fillMaxWidth().heightIn(min=180.dp,max=300.dp))
                     Spacer(Modifier.height(20.dp))
                 } else if (track != null) {
-                    Icon(Icons.Default.GraphicEq,"カバー画像なし",modifier=Modifier.size(96.dp),tint=MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.height(16.dp))
+                    Surface(Modifier.size(190.dp),shape=MaterialTheme.shapes.extraLarge,color=MaterialTheme.colorScheme.secondaryContainer){Box(contentAlignment=Alignment.Center){Icon(Icons.Default.GraphicEq,"カバー画像なし",modifier=Modifier.size(88.dp),tint=MaterialTheme.colorScheme.onSecondaryContainer)}}
+                    Spacer(Modifier.height(20.dp))
                 }
                 Text(track?.name?:"再生するファイルがありません",style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.SemiBold,maxLines=5,overflow=TextOverflow.Ellipsis,modifier=Modifier.fillMaxWidth())
                 Spacer(Modifier.height(20.dp)); SeekSection(position,duration,followingDuration,speed,track!=null,viewModel::seekTo); Spacer(Modifier.height(18.dp))
