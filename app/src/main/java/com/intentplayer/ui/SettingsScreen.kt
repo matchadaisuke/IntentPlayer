@@ -51,6 +51,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
     val focusSend by viewModel.blockAudioFocusSend.collectAsState()
     val focusReceive by viewModel.blockAudioFocusReceive.collectAsState()
     val bluetooth by viewModel.autoBluetoothControlEnabled.collectAsState()
+    val autoPlayOnBoot by viewModel.autoPlayOnBootEnabled.collectAsState()
     val timeoutEnabled by viewModel.autoResumeTimeoutEnabled.collectAsState()
     val timeoutMs by viewModel.autoResumeTimeoutMs.collectAsState()
     val reconnectMs by viewModel.bluetoothReconnectDelayMs.collectAsState()
@@ -184,6 +185,12 @@ fun SettingsScreen(viewModel: MainViewModel) {
                 "有効にすると他のアプリによるオーディオフォーカスの変化を受けてもIntentPlayerを一時停止しません。他のアプリが音声を再生し始めても、そのまま再生を続けます。",
                 focusReceive,
                 viewModel::setBlockAudioFocusReceive
+            )
+            SwitchRow(
+                "端末起動時に自動再生する",
+                "有効にすると、端末起動時に前回再生していたフォルダの再生を自動で開始します。誤作動を防ぐ場合は無効（デフォルト）にしてください。",
+                autoPlayOnBoot,
+                viewModel::setAutoPlayOnBootEnabled
             )
 
             Category(Icons.Default.Bluetooth, "接続")
@@ -579,6 +586,7 @@ private fun applyImportedSettings(viewModel: MainViewModel, context: Context) {
     viewModel.setEnableAppVolume(PreferencesManager.isEnableAppVolume(context))
     viewModel.setAppPlaybackVolume(PreferencesManager.getAppPlaybackVolume(context))
     viewModel.setPlaybackSpeed(PreferencesManager.getPlaybackSpeed(context))
+    viewModel.setAutoPlayOnBootEnabled(PreferencesManager.isAutoPlayOnBootEnabled(context))
 }
 
 private fun loadDefaultFolder(context: Context): Uri? =

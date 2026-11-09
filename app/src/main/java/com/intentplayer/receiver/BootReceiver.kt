@@ -20,10 +20,10 @@ import com.intentplayer.storage.PreferencesManager
  *
  * BOOT_COMPLETED:
  *   ユーザーが初回ロック解除後に発火するため、SharedPreferences が読める。
- *   folderUri を復元し、サービスを起動して再生を再開する。
+ *   「端末起動時に自動再生」設定が有効な場合のみ再生を開始し、無効な場合は待機状態としてサービスを起動する。
  *
  * MY_PACKAGE_REPLACED:
- *   アプリ更新時の再起動。更新前に再生していた場合は再開する。
+ *   アプリ更新時の再起動。待機状態としてサービスを再起動する。
  *
  * 備考 (Android 12+ バックグラウンド起動制限):
  *   BOOT_COMPLETED は「FGS バックグラウンド起動許可」の例外ケースであり、
@@ -42,9 +42,14 @@ class BootReceiver : BroadcastReceiver() {
         when (intent.action) {
             Intent.ACTION_BOOT_COMPLETED -> {
                 // BOOT_COMPLETED: SharedPreferences が読める段階
-                // → folderUri を確認してサービスを起動
-                Log.d(TAG, "BOOT_COMPLETED: starting playback if needed")
-                startPlaybackServiceIfNeeded(context)
+                // → 自動再生設定に応じて処理を分岐
+                if (PreferencesManager.isAutoPlayOnBootEnabled(context)) {
+                    Log.d(TAG, "BOOT_COMPLETED: starting playback (auto-play on boot enabled)")
+                    startPlaybackServiceIfNeeded(context)
+                } else {
+                    Log.d(TAG, "BOOT_COMPLETED: starting service in standby (auto-play on boot disabled)")
+                    startServiceStandbyIfNeeded(context)
+                }
             }
 
             Intent.ACTION_LOCKED_BOOT_COMPLETED -> {

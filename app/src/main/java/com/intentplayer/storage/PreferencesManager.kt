@@ -30,6 +30,7 @@ object PreferencesManager {
     private const val KEY_PREF_ENABLE_APP_VOLUME = "pref_enable_app_volume"
     private const val KEY_PREF_APP_PLAYBACK_VOLUME = "pref_app_playback_volume"
     private const val KEY_PREF_PLAYBACK_SPEED = "pref_playback_speed"
+    private const val KEY_PREF_AUTO_PLAY_ON_BOOT = "pref_auto_play_on_boot"
     private const val KEY_DEFAULT_FOLDER_URI = "default_folder_uri"
 
     private const val SETTINGS_FORMAT = "IntentPlayer settings"
@@ -229,6 +230,15 @@ object PreferencesManager {
             .edit { putFloat(KEY_PREF_PLAYBACK_SPEED, normalizePlaybackSpeed(speed)) }
     }
 
+    fun isAutoPlayOnBootEnabled(context: Context): Boolean =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_PREF_AUTO_PLAY_ON_BOOT, false)
+
+    fun setAutoPlayOnBootEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit { putBoolean(KEY_PREF_AUTO_PLAY_ON_BOOT, enabled) }
+    }
+
     fun exportSettings(context: Context): String {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         return JSONObject().apply {
@@ -246,6 +256,7 @@ object PreferencesManager {
             put(KEY_PREF_ENABLE_APP_VOLUME, isEnableAppVolume(context))
             put(KEY_PREF_APP_PLAYBACK_VOLUME, getAppPlaybackVolume(context).toDouble())
             put(KEY_PREF_PLAYBACK_SPEED, getPlaybackSpeed(context).toDouble())
+            put(KEY_PREF_AUTO_PLAY_ON_BOOT, isAutoPlayOnBootEnabled(context))
             put(AppThemePreferences.KEY_THEME_MODE, AppThemePreferences.get(context).storedValue)
             prefs.getString(KEY_DEFAULT_FOLDER_URI, null)?.let { put(KEY_DEFAULT_FOLDER_URI, it) }
         }.toString(2)
@@ -271,6 +282,7 @@ object PreferencesManager {
         booleanIfPresent(KEY_PREF_AUTO_RESUME_TIMEOUT_ENABLED)
         booleanIfPresent(KEY_PREF_USE_CUSTOM_MEDIA_PLAYBACK)
         booleanIfPresent(KEY_PREF_ENABLE_APP_VOLUME)
+        booleanIfPresent(KEY_PREF_AUTO_PLAY_ON_BOOT)
 
         if (json.has(KEY_PREF_BLUETOOTH_RECONNECT_DELAY_MS)) {
             updates[KEY_PREF_BLUETOOTH_RECONNECT_DELAY_MS] =

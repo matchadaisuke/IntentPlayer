@@ -56,6 +56,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val useCustomMediaPlayback = MutableStateFlow(true)
     val enableAppVolume = MutableStateFlow(true)
     val appPlaybackVolume = MutableStateFlow(1.0f)
+    val autoPlayOnBootEnabled = MutableStateFlow(false)
     val appVersion = MutableStateFlow("Unknown")
     val errorLogs = MutableStateFlow<List<String>>(emptyList())
 
@@ -137,6 +138,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         enableAppVolume.value = PreferencesManager.isEnableAppVolume(context)
         appPlaybackVolume.value = PreferencesManager.getAppPlaybackVolume(context)
         playbackSpeed.value = PreferencesManager.getPlaybackSpeed(context)
+        autoPlayOnBootEnabled.value = PreferencesManager.isAutoPlayOnBootEnabled(context)
     }
 
     fun completeOnboarding() {
@@ -187,6 +189,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setAutoResumeTimeoutMs(timeoutMs: Long) {
         PreferencesManager.setAutoResumeTimeoutMs(context, timeoutMs)
         autoResumeTimeoutMs.value = PreferencesManager.getAutoResumeTimeoutMs(context)
+    }
+
+    fun setAutoPlayOnBootEnabled(enabled: Boolean) {
+        PreferencesManager.setAutoPlayOnBootEnabled(context, enabled)
+        autoPlayOnBootEnabled.value = PreferencesManager.isAutoPlayOnBootEnabled(context)
     }
 
     fun setUseCustomMediaPlayback(enabled: Boolean) {
